@@ -1,11 +1,12 @@
 // src/scenes/GameScene.js
 import Phaser from 'phaser';
 import {
-  loadCloud,
-  saveCloud,
   showRewarded,
   showInterstitial,
+  setAdHooks,
   setLeaderboardScore,
+  saveData,
+  loadData,
   getPlayerName
 } from '../sdk/yandex.js';
 
@@ -79,6 +80,19 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.removeAllListeners();
     this.input.removeAllListeners();
 
+    setAdHooks({
+      onOpen: () => {
+        this.physics?.world?.pause?.();
+        this.time?.pause?.();
+        if (this.sound) this.sound.mute = true;
+      },
+      onClose: () => {
+        this.physics?.world?.resume?.();
+        this.time?.resume?.();
+        if (this.sound) this.sound.mute = false;
+      }
+    });
+
     const W = this.scale.width, H = this.scale.height;
     this.centerX = W / 2;
     this.topY = Math.max(80, (H - BOARD_H) / 2 - 16);
@@ -96,8 +110,6 @@ export default class GameScene extends Phaser.Scene {
     this.layoutButtonsUnderBoard();
     this.initInput();
     this.initAudio(); if (this.musicOn) this.deferStartMusic();
-
-    await showInterstitial();
 
     // страховка ввода
     this.allowInput = true;
@@ -484,7 +496,8 @@ export default class GameScene extends Phaser.Scene {
 
   const btnAds  = this.createButton(box.x, btnY2, btnW, btnH, '+10 отмен за рекламу', async ()=>{
     const ok = await showRewarded();
-    if(ok){ this.undoCount+=10; this.updateButtons(); this.flashStatus('+10 отмен получено'); this.playSfx('claim'); }
+    if (!ok) return;
+    this.undoCount+=10; this.updateButtons(); this.flashStatus('+10 отмен получено'); this.playSfx('claim');
   });
 
   cont.add([lblMusic, togMusic, lblSfx, togSfx, btnNick.container, btnAds.container]);
@@ -788,11 +801,16 @@ export default class GameScene extends Phaser.Scene {
   }
 
   async onGameOver() {
-    if (this.score > this.bestScore) {
-      this.bestScore = this.score;
-      await this.saveProgress();
-      await setLeaderboardScore('2048-elements-best', this.bestScore);
-    }
+    try {
+      if (typeof this.score === 'number') {
+        await setLeaderboardScore('2048-elements-best', this.score|0);
+      }
+      if (this.bestScore == null || this.score > this.bestScore) {
+        this.bestScore = this.score;
+        await saveData('bestScore', this.bestScore);
+      }
+    } catch {}
+    await showInterstitial().catch(()=>{});
     this.updateUI();
     pushLocalScore(this.score, this.nickname || 'Игрок');
 
@@ -834,7 +852,8 @@ export default class GameScene extends Phaser.Scene {
     r.on('pointerup', async () => {
       timeout.remove(); r.destroy(); t.destroy();
       const ok = await showRewarded();
-      if (ok) { this.activateDouble(); this.playSfx('claim'); }
+      if (!ok) return;
+      this.activateDouble(); this.playSfx('claim');
     });
   }
 
@@ -1020,8 +1039,8 @@ export default class GameScene extends Phaser.Scene {
   /* -------------------- Persistence -------------------- */
   async loadProgress() {
     try {
-      const saved = await loadCloud();
-      if (saved && typeof saved.bestScore === 'number') this.bestScore = Math.max(this.bestScore, saved.bestScore | 0);
+      const saved = await loadData('bestScore');
+      if (typeof saved === 'number') this.bestScore = Math.max(this.bestScore, saved | 0);
       const local = JSON.parse(localStorage.getItem('yag-2048-save-v1') || '{}');
       if (local && typeof local.bestScore === 'number') this.bestScore = Math.max(this.bestScore, local.bestScore | 0);
       const stg = JSON.parse(localStorage.getItem('yag-2048-settings') || '{}');
@@ -1030,7 +1049,7 @@ export default class GameScene extends Phaser.Scene {
     } catch (e) {}
   }
   async saveProgress() {
-    try { await saveCloud({ bestScore: this.bestScore }); } catch (e) {}
+    try { await saveData('bestScore', this.bestScore); } catch (e) {}
     localStorage.setItem('yag-2048-save-v1', JSON.stringify({ bestScore: this.bestScore }));
   }
 
