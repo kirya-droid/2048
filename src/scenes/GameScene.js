@@ -9,6 +9,8 @@ import {
   loadData,
   getPlayerName
 } from '../sdk/yandex.js';
+import { THEME } from '../ui/theme.js';
+import { drawGradientRect, makeGlassPanel, makeText, addTitleWithShine } from '../ui/fx.js';
 
 const GRID = 4, TILE = 104, GAP = 10;
 const BOARD_W = GRID * TILE + (GRID + 1) * GAP;
@@ -36,6 +38,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.score = 0;
     this.bestScore = 0;
+    this.lastScore = 0;
 
     this.isMoving = false;
     this.allowInput = true;
@@ -97,6 +100,9 @@ export default class GameScene extends Phaser.Scene {
     this.centerX = W / 2;
     this.topY = Math.max(80, (H - BOARD_H) / 2 - 16);
 
+    const bg = drawGradientRect(this, W / 2, H / 2, W, H, THEME.bgGradient);
+    bg.setDepth(-1000);
+
     this.createSparkTexture();
     this.addHeader();
     this.drawBoard();
@@ -136,9 +142,8 @@ export default class GameScene extends Phaser.Scene {
     }
     this.nickname = nick;
     if (!this.nickText) {
-      this.nickText = this.add.text(this.centerX, 14, '👤 ' + this.nickname,
-        { fontFamily: 'Arial, sans-serif', fontSize: 14, color: '#9bb4ff' }
-      ).setOrigin(0.5).setDepth(this.uiDepth);
+      this.nickText = makeText(this, this.centerX, 14, '👤 ' + this.nickname, 'subtle')
+        .setOrigin(0.5).setDepth(this.uiDepth);
     } else {
       this.nickText.setText('👤 ' + this.nickname);
     }
@@ -146,103 +151,28 @@ export default class GameScene extends Phaser.Scene {
 
   /* -------------------- UI -------------------- */
   addHeader(){
-  // Базовый тайтл
-  this.title = this.add.text(this.centerX, 42, '2048: Elements', {
-    fontFamily: 'Arial, sans-serif',
-    fontSize: 34,
-    color: '#f0f3ff'
-  }).setOrigin(0.5).setDepth(this.uiDepth);
+  this.title = addTitleWithShine(this, this.centerX, 42, '2048: Elements');
+  this.title.setDepth(this.uiDepth);
 
-  if (this.title.setStroke) this.title.setStroke('#2a3547', 6);
-  this.title.setShadow(0, 0, '#74a7ff', 10, true, true);
-
-  // Лёгкая пульсация
-  this.tweens.add({
-    targets: this.title, scale: 1.02, duration: 1600,
-    ease: 'Sine.InOut', yoyo: true, repeat: -1
-  });
-
-  // --- БЛЕСК (без BitmapMask) ---
-  try {
-    // Дубликат текста (белый, ADD), он будет "подсвечиваться" полосой‑маской
-    const shiny = this.add.text(this.title.x, this.title.y, this.title.text, {
-      fontFamily: 'Arial, sans-serif',
-      fontSize: 34,
-      color: '#ffffff'
-    }).setOrigin(0.5).setDepth(this.uiDepth + 1).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.0);
-
-    // Прямоугольник‑маска (GeometryMask)
-    const maskG = this.add.graphics().fillStyle(0xffffff, 1);
-    const barW = 44, barH = Math.ceil(this.title.height + 8);
-    maskG.fillRect(0, 0, barW, barH);
-    const geomMask = maskG.createGeometryMask();
-    shiny.setMask(geomMask);
-
-    const startX = this.title.x - this.title.displayWidth / 2 - 56;
-    const endX   = this.title.x + this.title.displayWidth / 2 + 56;
-    maskG.x = startX;
-    maskG.y = this.title.y - (barH / 2);
-
-    const runShine = () => {
-      shiny.setAlpha(0.9);
-      this.tweens.add({
-        targets: maskG, x: endX, duration: 2000, ease: 'Sine.InOut',
-        onComplete: () => {
-          shiny.setAlpha(0.0);
-          maskG.x = startX;
-          this.time.delayedCall(1200, runShine);
-        }
-      });
-    };
-    runShine();
-  } catch (e) {
-    console.warn('[header-shine] disabled:', e);
-  }
-  // --- конец блока блика ---
-
-  // Небольшие искры вокруг тайтла
-  try {
-    const p = this.add.particles('spark');
-    p.createEmitter({
-      x: this.title.x, y: this.title.y - 6,
-      speed: {min:10,max:30}, lifespan: 1200,
-      scale: {start:0.7, end:0},
-      alpha: {start:0.6, end:0},
-      quantity: 1, frequency: 180,
-      tint: [0x6aa5ff, 0xffffff, 0x88ddff],
-      blendMode: 'ADD'
-    });
-  } catch(e){ /* безопасно пропускаем, если текстуры ещё не готовы */ }
-
-  // Ник — выше, чтобы не лип к тайтлу
-  this.nickText = this.add.text(this.centerX, 14, '👤 ' + (this.nickname || ''), {
-    fontFamily: 'Arial, sans-serif', fontSize: 14, color: '#9bb4ff'
-  }).setOrigin(0.5).setDepth(this.uiDepth);
-
-  // Панель счёта чуть ниже — место под тайтл и ник
-  const panelY = 86, panelW = 460, panelH = 48;
-  this.add.rectangle(this.centerX, panelY, panelW, panelH, 0x1b2330)
-      .setStrokeStyle(2, 0x2a3547).setDepth(this.uiDepth);
-
-  this.scoreText = this.add.text(this.centerX - panelW/2 + 12, panelY, 'Счёт: 0', {
-    fontFamily:'Arial, sans-serif', fontSize:20, color:'#eaf2ff'
-  }).setOrigin(0,0.5).setDepth(this.uiDepth);
-
-  this.bestText = this.add.text(this.centerX + panelW/2 - 44, panelY, 'Рекорд: 0', {
-    fontFamily:'Arial, sans-serif', fontSize:20, color:'#9bb4ff'
-  }).setOrigin(1,0.5).setDepth(this.uiDepth);
-
-  const menuBtn = this.add.rectangle(this.centerX + panelW/2 - 16, panelY, 24, 24, 0x253145)
-      .setStrokeStyle(2, 0x3a4c6a).setInteractive({useHandCursor:true}).setDepth(this.uiDepth);
-  this.add.text(menuBtn.x, menuBtn.y, '≡', { fontFamily:'Arial, sans-serif', fontSize:16, color:'#e6eeff' })
+  this.nickText = makeText(this, this.centerX, 14, '👤 ' + (this.nickname || ''), 'subtle')
       .setOrigin(0.5).setDepth(this.uiDepth);
 
-  menuBtn.on('pointerdown',()=>menuBtn.fillColor=0x2d3c58);
-  menuBtn.on('pointerup',()=>{ menuBtn.fillColor=0x253145; this.playSfx('click'); this.openMenu(); });
+  const panelY = 86, panelW = 460, panelH = 48;
+  this.scorePanel = makeGlassPanel(this, this.centerX, panelY, panelW, panelH).setDepth(this.uiDepth);
 
-  this.statusText = this.add.text(this.centerX, panelY + panelH/2 + 14, '', {
-    fontFamily:'Arial, sans-serif', fontSize:16, color:'#c7d6ff'
-  }).setOrigin(0.5).setDepth(this.uiDepth);
+  this.scoreText = makeText(this, this.centerX - panelW/2 + 12, panelY, 'Счёт: 0', 'h2')
+      .setOrigin(0,0.5).setDepth(this.uiDepth);
+  this.bestText = makeText(this, this.centerX + panelW/2 - 44, panelY, 'Рекорд: 0', 'body')
+      .setOrigin(1,0.5).setDepth(this.uiDepth);
+
+  const menuBtn = this.add.rectangle(this.centerX + panelW/2 - 16, panelY, 24, 24, THEME.button.fill)
+      .setStrokeStyle(2, THEME.button.stroke).setInteractive({useHandCursor:true}).setDepth(this.uiDepth);
+  makeText(this, menuBtn.x, menuBtn.y, '≡', 'body').setOrigin(0.5).setDepth(this.uiDepth);
+  menuBtn.on('pointerdown',()=>menuBtn.fillColor=THEME.button.fillActive);
+  menuBtn.on('pointerup',()=>{ menuBtn.fillColor=THEME.button.fill; this.playSfx('click'); this.openMenu(); });
+
+  this.statusText = makeText(this, this.centerX, panelY + panelH/2 + 14, '', 'subtle')
+      .setOrigin(0.5).setDepth(this.uiDepth);
 }
 
   layoutButtonsUnderBoard() {
@@ -264,17 +194,40 @@ export default class GameScene extends Phaser.Scene {
 
   createButton(x, y, w, h, label, onClick) {
     const cont = this.add.container(x, y).setDepth(this.uiDepth);
-    const rect = this.add.rectangle(0, 0, w, h, 0x253145)
-      .setStrokeStyle(2, 0x3a4c6a).setInteractive({ useHandCursor: true });
-    const text = this.add.text(0, 0, label,
-      { fontFamily: 'Arial, sans-serif', fontSize: 18, color: '#e6eeff' }
-    ).setOrigin(0.5);
+    const key = `btn-${w}x${h}`;
+    if (!this.textures.exists(key)) {
+      const g = this.add.graphics();
+      g.fillStyle(THEME.button.fill, 1);
+      g.lineStyle(2, THEME.button.stroke, 1);
+      g.fillRoundedRect(0, 0, w, h, THEME.button.radius);
+      g.strokeRoundedRect(0, 0, w, h, THEME.button.radius);
+      g.generateTexture(key, w, h);
+      g.destroy();
+    }
+    const bg = this.add.image(0, 0, key).setInteractive({ useHandCursor: true }).setOrigin(0.5);
+    const text = makeText(this, 0, 0, label, 'body').setOrigin(0.5).setColor(THEME.button.text);
 
-    rect.on('pointerdown', () => rect.fillColor = 0x2d3c58);
-    rect.on('pointerup', () => { rect.fillColor = 0x253145; this.playSfx('click'); onClick(); });
+    bg.on('pointerover', () => {
+      this.tweens.add({ targets: cont, scale: 1.02, duration: THEME.motion.micro, ease: THEME.motion.easingInOut });
+    });
+    bg.on('pointerout', () => {
+      this.tweens.add({ targets: cont, scale: 1, duration: THEME.motion.micro, ease: THEME.motion.easingInOut });
+      bg.clearTint();
+    });
+    bg.on('pointerdown', () => {
+      bg.setTint(THEME.button.fillActive);
+      this.tweens.add({ targets: cont, scale: 0.98, duration: THEME.motion.micro });
+    });
+    bg.on('pointerup', () => {
+      bg.clearTint();
+      this.tweens.add({ targets: cont, scale: 1, duration: THEME.motion.micro });
+      this.playSfx('click');
+      onClick();
+    });
 
-    cont.add([rect, text]);
-    return { container: cont, rect: rect, text: text };
+    cont.add([bg, text]);
+    cont.setSize(w, h);
+    return { container: cont, rect: bg, text: text };
   }
 
   updateButtons(){
@@ -282,10 +235,10 @@ export default class GameScene extends Phaser.Scene {
     if (this.buttons.undo){
       this.buttons.undo.text.setText('Отмена (' + this.undoCount + ')');
       if (this.undoCount <= 0){
-        this.buttons.undo.rect.fillColor = 0x2a2f3f;
+        this.buttons.undo.rect.setTint(0x2a2f3f);
         this.buttons.undo.rect.disableInteractive();
       } else {
-        this.buttons.undo.rect.fillColor = 0x253145;
+        this.buttons.undo.rect.clearTint();
         this.buttons.undo.rect.setInteractive({ useHandCursor:true });
       }
     }
@@ -293,10 +246,10 @@ export default class GameScene extends Phaser.Scene {
     if (this.buttons.hammer){
       this.buttons.hammer.text.setText('Молоток (' + this.hammerCount + ')');
       if (this.hammerCount <= 0){
-        this.buttons.hammer.rect.fillColor = 0x2a2f3f;
+        this.buttons.hammer.rect.setTint(0x2a2f3f);
         this.buttons.hammer.rect.disableInteractive();
       } else {
-        this.buttons.hammer.rect.fillColor = 0x253145;
+        this.buttons.hammer.rect.clearTint();
         this.buttons.hammer.rect.setInteractive({ useHandCursor:true });
       }
     }
@@ -317,8 +270,7 @@ export default class GameScene extends Phaser.Scene {
       this.scale.width, this.scale.height, 0x000000).setAlpha(0.6).setInteractive();
     const box = this.add.rectangle(this.centerX, this.topY + 30, boxW, boxH, 0x1b2330)
       .setStrokeStyle(2, 0x2a3547).setOrigin(0.5, 0);
-    const title = this.add.text(box.x, box.y + 16, 'Меню',
-      { fontFamily: 'Arial, sans-serif', fontSize: 24, color: '#ffffff' }).setOrigin(0.5, 0);
+    const title = makeText(this, box.x, box.y + 16, 'Меню', 'h2').setOrigin(0.5, 0);
     const content = this.add.container(0, 0);
 
     this.menuLayer.add([overlay, box, title, content]);
@@ -334,8 +286,7 @@ export default class GameScene extends Phaser.Scene {
         const cx = startX + i * (tabW + gap);
         const r = this.add.rectangle(cx, box.y + 56, tabW, 32, on ? 0x2b3a52 : 0x253145)
           .setStrokeStyle(2, 0x3a4c6a).setInteractive({ useHandCursor: true });
-        const t = this.add.text(cx, r.y, tabs[i],
-          { fontFamily: 'Arial, sans-serif', fontSize: 16, color: '#e6eeff' }).setOrigin(0.5);
+        const t = makeText(this, cx, r.y, tabs[i], 'body').setOrigin(0.5);
         r.on('pointerup', () => { this.playSfx('click'); active = i; draw(); });
         content.add([r, t]);
       }
@@ -368,27 +319,22 @@ export default class GameScene extends Phaser.Scene {
   }
 
   fillLeaderboard(cont, box) {
-    cont.add(this.add.text(box.x, box.y + 96, 'Локальный рейтинг (топ‑10)',
-      { fontFamily: 'Arial, sans-serif', fontSize: 18, color: '#cfe0ff' }).setOrigin(0.5, 0));
+    cont.add(makeText(this, box.x, box.y + 96, 'Локальный рейтинг (топ‑10)', 'body').setOrigin(0.5,0));
     const scores = getLocalTopScores();
     if (!scores.length) {
-      cont.add(this.add.text(box.x, box.y + 140, 'Пока пусто. Сыграйте партию!',
-        { fontFamily: 'Arial, sans-serif', fontSize: 16, color: '#9bb4ff' }).setOrigin(0.5, 0));
+      cont.add(makeText(this, box.x, box.y + 140, 'Пока пусто. Сыграйте партию!', 'subtle').setOrigin(0.5,0));
       return;
     }
     const xL = box.x - 180, y0 = box.y + 140;
     for (let i = 0; i < Math.min(10, scores.length); i++) {
       const s = scores[i];
-      cont.add(this.add.text(xL, y0 + i * 28,
-        (i + 1) + '. ' + s.score + '  —  ' + new Date(s.ts).toLocaleString() + ' — ' + (s.nick || 'Игрок'),
-        { fontFamily: 'Arial, sans-serif', fontSize: 16, color: '#e6eeff' }).setOrigin(0, 0));
+      cont.add(makeText(this, xL, y0 + i * 28, (i + 1) + '. ' + s.score + '  —  ' + new Date(s.ts).toLocaleString() + ' — ' + (s.nick || 'Игрок'), 'body').setOrigin(0,0));
     }
   }
 
   fillQuests(cont, box) {
     const d = this.loadDaily();
-    cont.add(this.add.text(box.x, box.y + 96, 'Ежедневные задания',
-      { fontFamily: 'Arial, sans-serif', fontSize: 18, color: '#cfe0ff' }).setOrigin(0.5, 0));
+    cont.add(makeText(this, box.x, box.y + 96, 'Ежедневные задания', 'body').setOrigin(0.5,0));
 
     const items = [
       { key: 'play1',  title: 'Сыграй 1 партию',   progress: d.played ? 1 : 0, total: 1,  reward: '+1 молоток',
@@ -408,11 +354,9 @@ export default class GameScene extends Phaser.Scene {
       const complete = p >= 1;
       const claimed = d.claimed && d.claimed[it.key];
 
-      const card = this.add.rectangle(box.x, y + cardH / 2, cardW, cardH, 0x202a39).setStrokeStyle(2, 0x33445d);
-      const title = this.add.text(x + 14, y + 12, it.title,
-        { fontFamily: 'Arial, sans-serif', fontSize: 18, color: '#e6eeff' }).setOrigin(0, 0);
-      const reward = this.add.text(x + 14, y + 36, 'Награда: ' + it.reward,
-        { fontFamily: 'Arial, sans-serif', fontSize: 14, color: '#9bb4ff' }).setOrigin(0, 0);
+      const card = makeGlassPanel(this, box.x, y + cardH / 2, cardW, cardH);
+      const title = makeText(this, x + 14, y + 12, it.title, 'body').setOrigin(0,0);
+      const reward = makeText(this, x + 14, y + 36, 'Награда: ' + it.reward, 'subtle').setOrigin(0,0);
 
       const pbX = x + 14, pbY = y + 60, pbW = cardW - 14 - 140, pbH = 12;
       const pbBg = this.add.rectangle(pbX + pbW / 2, pbY, pbW, pbH, 0x233042);
@@ -439,13 +383,11 @@ export default class GameScene extends Phaser.Scene {
       y += cardH + 14;
     }
 
-    cont.add(this.add.text(box.x, y + 4, 'Ежедневные задания обновляются раз в день',
-      { fontFamily: 'Arial, sans-serif', fontSize: 14, color: '#9bb4ff' }).setOrigin(0.5, 0));
+    cont.add(makeText(this, box.x, y + 4, 'Ежедневные задания обновляются раз в день', 'subtle').setOrigin(0.5,0));
   }
 
   // Настройки с «пилюльными» тумблерами
   fillSettings(cont, box){
-  const styleLabel = { fontFamily:'Arial, sans-serif', fontSize:18, color:'#e6eeff' };
   const xLabel = box.x - 140;     // колонка подписей
   const xToggle = box.x + 110;    // колонка тумблеров
   const y0 = box.y + 150, step = 60;
@@ -477,10 +419,10 @@ export default class GameScene extends Phaser.Scene {
   };
 
   // Ряды «Музыка» / «Звуки»
-  const lblMusic = this.add.text(xLabel, y0, 'Музыка', styleLabel).setOrigin(1,0.5);
+  const lblMusic = makeText(this, xLabel, y0, 'Музыка', 'body').setOrigin(1,0.5);
   const togMusic = makePillToggle(xToggle, y0, this.musicOn, (v)=>{ this.musicOn=v; if(v) this.startMusic(); else this.stopMusic(); this.saveSettings(); });
 
-  const lblSfx = this.add.text(xLabel, y0+step, 'Звуки', styleLabel).setOrigin(1,0.5);
+  const lblSfx = makeText(this, xLabel, y0+step, 'Звуки', 'body').setOrigin(1,0.5);
   const togSfx = makePillToggle(xToggle, y0+step, this.sfxOn, (v)=>{ this.sfxOn=v; this.saveSettings(); });
 
   // --- Кнопки вертикально по центру ---
@@ -545,22 +487,41 @@ export default class GameScene extends Phaser.Scene {
     const cont = this.add.container(p.x, p.y).setDepth(120);
     cont.setSize(TILE, TILE); cont.setInteractive();
 
-    const rect = this.add.rectangle(0, 0, TILE, TILE, colorFor(value));
-    const text = this.add.text(0, -8, '' + value,
-      { fontFamily: 'Arial, sans-serif', fontSize: value >= 1024 ? 32 : value >= 128 ? 38 : 44, color: '#fff' }
-    ).setOrigin(0.5);
-    const el = this.add.text(0, TILE / 2 - 28, elementFor(value),
-      { fontFamily: 'Arial, sans-serif', fontSize: 20, color: '#fff' }).setOrigin(0.5);
+    const style = tileStyleFor(value);
+    const key = `tile-${value}-${TILE}`;
+    if (!this.textures.exists(key)) {
+      const g = this.add.graphics();
+      g.fillGradientStyle(style.from, style.from, style.to, style.to, 1);
+      g.fillRoundedRect(-TILE/2,-TILE/2,TILE,TILE,THEME.glass.radius);
+      g.generateTexture(key, TILE, TILE);
+      g.destroy();
+    }
+    const rect = this.add.image(0, 0, key).setDisplaySize(TILE, TILE);
+    const highlight = this.add.graphics();
+    highlight.fillStyle(0xffffff,0.15);
+    highlight.fillRoundedRect(-TILE/2,-TILE/2,TILE,TILE,THEME.glass.radius);
 
-    cont.add([rect, text, el]);
+    const text = makeText(this, 0, -8, '' + value, 'title')
+      .setOrigin(0.5).setColor(style.text)
+      .setFontSize(value >= 1024 ? 32 : value >= 128 ? 38 : 44);
+    const el = makeText(this, 0, TILE / 2 - 28, style.chip, 'body')
+      .setOrigin(0.5).setFontSize(20).setColor(style.text);
+
+    cont.add([rect, highlight, text, el]);
     cont.setScale(0);
-    this.tweens.add({ targets: cont, scale: 1, duration: 120, ease: 'Back.Out' });
+    this.tweens.add({ targets: cont, scale: 1, duration: THEME.motion.fast, ease: THEME.motion.easingOut });
 
     const tile = { r: r, c: c, value: value, container: cont, rect: rect, text: text, el: el, destroyed: false };
     this.tiles.add(tile);
 
     cont.on('pointerup', () => {
       if (this.hammerMode && this.hammerCount > 0 && !this.isMoving && !this.isMenuOpen) this.useHammerOn(tile);
+    });
+
+    cont.on('pointerover', () => {
+      if (this.hammerMode) {
+        this.tweens.add({ targets: cont, scale: 1.03, duration: THEME.motion.micro, yoyo: true });
+      }
     });
 
     return tile;
@@ -704,6 +665,7 @@ export default class GameScene extends Phaser.Scene {
 
           if (keep.value >= 2048) { const pos = this.xyToPixel(tp.r, tp.c); this.emitFireworks(pos.x, pos.y); }
           this.playSfx('merge');
+          this.tweens.add({ targets: keep.container, scale: 1.08, yoyo: true, duration: THEME.motion.merge });
           i++; dst++;
         } else {
           const tp = idx[dst];
@@ -728,10 +690,19 @@ export default class GameScene extends Phaser.Scene {
     await Promise.all(tweens);
     this.tiles.forEach(t => {
       if (!t.destroyed) {
+        const style = tileStyleFor(t.value);
+        const key = `tile-${t.value}-${TILE}`;
+        if (!this.textures.exists(key)) {
+          const g = this.add.graphics();
+          g.fillGradientStyle(style.from, style.from, style.to, style.to, 1);
+          g.fillRoundedRect(-TILE/2,-TILE/2,TILE,TILE,THEME.glass.radius);
+          g.generateTexture(key, TILE, TILE);
+          g.destroy();
+        }
+        t.rect.setTexture(key).setDisplaySize(TILE, TILE);
         t.text.setText('' + t.value);
-        t.text.setFontSize(t.value >= 1024 ? 32 : t.value >= 128 ? 38 : 44);
-        t.rect.fillColor = colorFor(t.value);
-        t.el.setText(elementFor(t.value));
+        t.text.setFontSize(t.value >= 1024 ? 32 : t.value >= 128 ? 38 : 44).setColor(style.text);
+        t.el.setText(style.chip).setColor(style.text);
       }
     });
     return any;
@@ -827,12 +798,11 @@ export default class GameScene extends Phaser.Scene {
   showGameOverOverlay(msg) {
     const overlay = this.add.rectangle(this.centerX, this.topY + BOARD_H / 2, BOARD_W, BOARD_H, 0x000000)
       .setAlpha(0.6).setInteractive().setDepth(this.overlayDepth);
-    const box = this.add.rectangle(this.centerX, overlay.y, 320, 220, 0x1b2330)
-      .setStrokeStyle(2, 0x2a3547).setDepth(this.overlayDepth + 1);
-    const t = this.add.text(this.centerX, overlay.y - 50, msg || 'Игра окончена',
-      { fontFamily: 'Arial, sans-serif', fontSize: 28, color: '#ffffff' }).setOrigin(0.5).setDepth(this.overlayDepth + 1);
-    const s = this.add.text(this.centerX, overlay.y - 10, 'Счёт: ' + this.score,
-      { fontFamily: 'Arial, sans-serif', fontSize: 20, color: '#dbe7ff' }).setOrigin(0.5).setDepth(this.overlayDepth + 1);
+    const box = makeGlassPanel(this, this.centerX, overlay.y, 320, 220).setDepth(this.overlayDepth + 1);
+    const t = makeText(this, this.centerX, overlay.y - 50, msg || 'Игра окончена', 'h2')
+      .setOrigin(0.5).setDepth(this.overlayDepth + 1);
+    const s = makeText(this, this.centerX, overlay.y - 10, 'Счёт: ' + this.score, 'body')
+      .setOrigin(0.5).setDepth(this.overlayDepth + 1);
 
     const b = this.createButton(this.centerX, overlay.y + 48, 200, 44, 'Сыграть ещё раз', () => {
       overlay.destroy(); box.destroy(); t.destroy(); s.destroy(); b.container.destroy();
@@ -845,8 +815,7 @@ export default class GameScene extends Phaser.Scene {
     const x = this.centerX + BOARD_W / 2 - 24, y = this.topY - 10;
     const r = this.add.circle(x, y, 18, 0xcc4566).setStrokeStyle(2, 0xffffff)
       .setInteractive({ useHandCursor: true }).setDepth(this.uiDepth);
-    const t = this.add.text(x, y, 'x2', { fontFamily: 'Arial, sans-serif', fontSize: 16, color: '#fff' })
-      .setOrigin(0.5).setDepth(this.uiDepth);
+    const t = makeText(this, x, y, 'x2', 'body').setOrigin(0.5).setDepth(this.uiDepth);
     this.tweens.add({ targets: [r, t], y: y + 8, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
     const timeout = this.time.delayedCall(15000, () => { try { r.destroy(); t.destroy(); } catch (e) {} });
     r.on('pointerup', async () => {
@@ -861,8 +830,8 @@ export default class GameScene extends Phaser.Scene {
     this.doubleActive = true;
     this.doubleUntil = this.time.now + X2_DURATION_SEC * 1000;
     if (this.doubleTimerText) this.doubleTimerText.destroy();
-    this.doubleTimerText = this.add.text(this.centerX, 104, 'x2: ' + X2_DURATION_SEC + 's',
-      { fontFamily: 'Arial, sans-serif', fontSize: 16, color: '#ffd166' }).setOrigin(0.5);
+    this.doubleTimerText = makeText(this, this.centerX, 104, 'x2: ' + X2_DURATION_SEC + 's', 'body')
+      .setOrigin(0.5).setColor('#ffd166');
     const timer = this.time.addEvent({
       delay: 1000, repeat: X2_DURATION_SEC,
       callback: () => {
@@ -1054,31 +1023,22 @@ export default class GameScene extends Phaser.Scene {
   }
 
   updateUI() {
-    if (this.scoreText) this.scoreText.setText('Счёт: ' + this.score);
+    if (this.scoreText) {
+      this.scoreText.setText('Счёт: ' + this.score);
+      if (this.lastScore !== this.score) {
+        this.tweens.add({ targets: this.scoreText, scale: 1.06, yoyo: true, duration: THEME.motion.micro });
+        if (this.scorePanel) this.tweens.add({ targets: this.scorePanel, alpha: 0.8, yoyo: true, duration: 300 });
+        this.lastScore = this.score;
+      }
+    }
     if (this.bestText)  this.bestText.setText('Рекорд: ' + this.bestScore);
     this.updateButtons();
   }
 }
 
 /* -------- helpers -------- */
-function colorFor(v) {
-  switch (v) {
-    case 2: return 0x32587d; case 4: return 0x2e6a7f; case 8: return 0x2c7e79;
-    case 16: return 0x2a8f6a; case 32: return 0x39a35e; case 64: return 0x6aba46;
-    case 128: return 0xb3c73c; case 256: return 0xe0b73d; case 512: return 0xe08a3d;
-    case 1024: return 0xde5e4f; case 2048: return 0xcc4566; case 4096: return 0x8e44ad;
-    case 8192: return 0x34495e; default: return 0x2a3547;
-  }
-}
-function elementFor(v) {
-  if (v <= 8) return '💧';
-  if (v <= 64) return '🌱';
-  if (v <= 512) return '🔥';
-  if (v <= 1024) return '🌪';
-  if (v <= 2048) return '⚡';
-  if (v <= 4096) return '💎';
-  if (v <= 8192) return '🌈';
-  return '🪐';
+function tileStyleFor(v){
+  return THEME.tile[v] || THEME.tile.default;
 }
 function getLocalTopScores() { const k = 'yag-2048-top'; const a = JSON.parse(localStorage.getItem(k) || '[]'); a.sort((x, y) => y.score - x.score); return a.slice(0, 10); }
 function pushLocalScore(score, nick) { const k = 'yag-2048-top'; const a = JSON.parse(localStorage.getItem(k) || '[]'); a.push({ score: score, ts: Date.now(), nick: nick }); a.sort((x, y) => y.score - x.score); while (a.length > 10) a.pop(); localStorage.setItem(k, JSON.stringify(a)); }
