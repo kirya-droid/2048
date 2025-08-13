@@ -105,6 +105,8 @@ export default class GameScene extends Phaser.Scene {
       }
     });
 
+    await showInterstitial({ force: true }).catch(()=>{});
+
     const W = this.scale.width, H = this.scale.height;
     this.centerX = W / 2;
     this.topY = Math.max(80, (H - BOARD_H) / 2 - 16);
