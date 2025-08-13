@@ -5,3 +5,6 @@
 - refresh theme to minimal dark palette
 - add hammer soft currency with rewarded ads and persistent save
 - periodic hint and random tile reroll bonuses
+- restructure HUD into title, score bar, and bonus panel
+- add freeze and double-turn bonuses with unified rewarded flow
+- responsive HUD layout without overlaps

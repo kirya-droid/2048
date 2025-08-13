@@ -26,7 +26,7 @@ const X2_DURATION_SEC = 30;
 const DEFAULT_MUSIC_ON = true;
 const DEFAULT_SFX_ON = true;
 
-const BONUS_CONFIG = { hintEvery: 30, rerollEvery: 20 };
+const BONUS_CONFIG = { hintEvery: 30, rerollEvery: 20, freezeEvery: 20, doubleEvery: 50 };
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -52,6 +52,11 @@ export default class GameScene extends Phaser.Scene {
 
     this.hammerCount = 0;
     this.hammerMode = false;
+
+    this.freezeCount = 0;
+
+    this.doubleCount = 0;
+    this.doubleTurns = 0;
 
     this.moveCount = 0;
 
@@ -108,7 +113,7 @@ export default class GameScene extends Phaser.Scene {
     bg.setDepth(-1000);
 
     this.createSparkTexture();
-    this.addHeader();
+    this.buildHUD();
     this.drawBoard();
     this.initGrid();
     for (let i = 0; i < START_TILES; i++) this.spawnRandomTile();
@@ -117,7 +122,9 @@ export default class GameScene extends Phaser.Scene {
     await this.ensureNickname();
     this.updateUI();
 
+    this.layoutHUD();
     this.layoutButtonsUnderBoard();
+    this.scale.on('resize', () => this.layoutHUD());
     this.initInput();
     this.initAudio(); if (this.musicOn) this.deferStartMusic();
 
@@ -154,27 +161,127 @@ export default class GameScene extends Phaser.Scene {
   }
 
   /* -------------------- UI -------------------- */
-  addHeader(){
-    this.title = addTitleWithShine(this, this.centerX, 42, '2048: Elements', { shiny: false });
-    this.title.setDepth(this.uiDepth);
+  buildHUD(){
+    this.hud = this.add.container(0,0).setDepth(this.uiDepth);
 
-    this.nickText = makeText(this, this.centerX, 14, '👤 ' + (this.nickname || ''), 'subtle')
-      .setOrigin(0.5).setDepth(this.uiDepth);
+    this.title = addTitleWithShine(this, 0, 0, '2048: Elements', { shiny: false });
+    this.hud.add(this.title);
 
-    const panelY = 86, panelW = 460, panelH = 48;
-    this.scorePanel = makeGlassPanel(this, this.centerX, panelY, panelW, panelH).setDepth(this.uiDepth);
+    this.nickText = makeText(this, 0, 0, '👤 ' + (this.nickname || ''), 'subtle')
+      .setOrigin(0.5);
+    this.hud.add(this.nickText);
 
-    this.scoreText = makeText(this, this.centerX - panelW / 2 + 12, panelY, 'Счёт: 0', 'h2')
-      .setOrigin(0, 0.5).setDepth(this.uiDepth);
-    this.bestText = makeText(this, this.centerX + panelW / 2 - 44, panelY, 'Рекорд: 0', 'body')
-      .setOrigin(1, 0.5).setDepth(this.uiDepth);
+    this.scorePanel = makeGlassPanel(this,0,0,460,48);
+    this.hud.add(this.scorePanel);
+    this.scoreText = makeText(this,0,0,'Счёт: 0','h2').setOrigin(0,0.5);
+    this.bestText = makeText(this,0,0,'Рекорд: 0','body').setOrigin(1,0.5);
+    this.hud.add([this.scoreText,this.bestText]);
 
-    this.hammerBtn = this.createButton(this.centerX + panelW / 2 - 60, panelY - panelH / 2 - 22,
-      100, 34, '🛠 0', () => this.toggleHammerMode());
-    this.hammerBtn.container.setDepth(this.uiDepth);
+    this.statusText = makeText(this,0,0,'','subtle').setOrigin(0.5);
+    this.hud.add(this.statusText);
 
-    this.statusText = makeText(this, this.centerX, panelY + panelH / 2 + 14, '', 'subtle')
-      .setOrigin(0.5).setDepth(this.uiDepth);
+    this.bonusPanel = this.add.container(0,0);
+    this.hud.add(this.bonusPanel);
+    this.bonusButtons = {};
+    const items = [
+      {icon:'🛠', label:'Молоток', key:'hammer'},
+      {icon:'❄', label:'Заморозка', key:'freeze'},
+      {icon:'⏩', label:'Двойной ход', key:'double'}
+    ];
+    items.forEach((it,i)=>{
+      const btn = this.makeBonusButton(it);
+      btn.container.y = i*48;
+      this.bonusPanel.add(btn.container);
+      this.bonusButtons[it.key] = btn;
+    });
+    this.updateBonusUI();
+  }
+
+  makeBonusButton({icon,label,key}){
+    const w=160,h=40;
+    const cont = this.add.container(0,0);
+    const tex=`bonus-${w}x${h}`;
+    if(!this.textures.exists(tex)){
+      const g=this.add.graphics();
+      g.fillStyle(THEME.button.fill,1);
+      g.lineStyle(2,THEME.button.stroke,1);
+      g.fillRoundedRect(0,0,w,h,THEME.button.radius);
+      g.strokeRoundedRect(0,0,w,h,THEME.button.radius);
+      g.generateTexture(tex,w,h); g.destroy();
+    }
+    const bg=this.add.image(0,0,tex).setOrigin(0.5).setInteractive({useHandCursor:true});
+    const iconT=makeText(this,-w/2+20,0,icon,'body').setOrigin(0.5);
+    const labelT=makeText(this,-w/2+40,0,label,'body').setOrigin(0,0.5);
+    const pill=this.add.graphics();
+    pill.fillStyle(THEME.button.fillActive,1);
+    pill.lineStyle(1,THEME.button.stroke,1);
+    pill.fillRoundedRect(-14,-10,28,20,10);
+    pill.x=w/2-20; pill.y=0;
+    const countT=makeText(this,w/2-20,0,'0','subtle').setOrigin(0.5).setColor('#fff');
+    cont.add([bg,iconT,labelT,pill,countT]);
+    cont.setSize(w,h);
+    bg.on('pointerover',()=>{
+      this.tweens.add({targets:cont,scale:1.03,duration:THEME.motion.micro});
+      bg.setTint(THEME.glow.color);
+    });
+    bg.on('pointerout',()=>{
+      this.tweens.add({targets:cont,scale:1,duration:THEME.motion.micro});
+      bg.clearTint();
+    });
+    bg.on('pointerup',()=>{ this.playSfx('click'); this.activateBonus(key); });
+    return {container:cont,countText:countT,rect:bg};
+  }
+
+  layoutHUD(){
+    const W=this.scale.width; const pad=12; const center=W/2; this.centerX=center;
+    const small=W<500; const scale=small?0.85:1;
+    const titleY=pad+24; this.title.setPosition(center,titleY); this.title.setScale(scale);
+    this.nickText.setPosition(center,pad); this.nickText.setScale(scale);
+    const scoreW=Math.min(W*0.8,460); const scoreY=titleY+40;
+    this.scorePanel.setPosition(center,scoreY); this.scorePanel.setScale(scoreW/460,1);
+    this.scoreText.setPosition(center-scoreW/2+12,scoreY); this.scoreText.setScale(scale);
+    this.bestText.setPosition(center+scoreW/2-12,scoreY); this.bestText.setScale(scale);
+    this.statusText.setPosition(center,scoreY+36); this.statusText.setScale(scale);
+    this.bonusPanel.x=W-pad-80; this.bonusPanel.y=pad; this.bonusPanel.setScale(scale);
+  }
+
+  updateBonusUI(){
+    const map={hammer:this.hammerCount, freeze:this.freezeCount, double:this.doubleCount};
+    for(const k in map){
+      const b=this.bonusButtons[k];
+      if(!b) continue;
+      b.countText.setText(map[k]);
+      if(map[k]<=0) b.rect.setTint(0x2a2f3f); else b.rect.clearTint();
+    }
+  }
+
+  async getBonusViaAd(type,amount=1){
+    const ok=await showRewarded();
+    if(!ok) return false;
+    if(type==='hammer') this.hammerCount+=amount;
+    if(type==='freeze') this.freezeCount+=amount;
+    if(type==='double') this.doubleCount+=amount;
+    await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});
+    this.updateBonusUI();
+    this.flashStatus('+'+amount+' '+(type==='hammer'?'🛠':type==='freeze'?'❄':'⏩'));
+    return true;
+  }
+
+  async activateBonus(key){
+    if(key==='hammer'){
+      if(this.hammerCount>0){ this.toggleHammerMode(); this.updateBonusUI(); }
+      else await this.getBonusViaAd('hammer');
+      return;
+    }
+    if(key==='freeze'){
+      if(this.freezeCount>0){ this.freezeCount--; this.applyFreeze(); this.updateBonusUI(); try{await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});}catch{} }
+      else await this.getBonusViaAd('freeze');
+      return;
+    }
+    if(key==='double'){
+      if(this.doubleCount>0 && this.doubleTurns===0){ this.doubleCount--; this.doubleTurns=2; this.updateBonusUI(); try{await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});}catch{} this.flashStatus('Двойной ход активен'); }
+      else if(this.doubleCount<=0){ await this.getBonusViaAd('double'); }
+    }
   }
 
   layoutButtonsUnderBoard() {
@@ -242,16 +349,6 @@ export default class GameScene extends Phaser.Scene {
       } else {
         this.buttons.undo.rect.clearTint();
         this.buttons.undo.rect.setInteractive({ useHandCursor:true });
-      }
-    }
-    if (this.hammerBtn){
-      this.hammerBtn.text.setText('🛠 ' + this.hammerCount);
-      if (this.hammerCount <= 0){
-        this.hammerBtn.rect.setTint(0x2a2f3f);
-        this.hammerBtn.rect.disableInteractive();
-      } else {
-        this.hammerBtn.rect.clearTint();
-        this.hammerBtn.rect.setInteractive({ useHandCursor:true });
       }
     }
   }
@@ -339,7 +436,7 @@ export default class GameScene extends Phaser.Scene {
 
     const items = [
       { key: 'play1',  title: 'Сыграй 1 партию',   progress: d.played ? 1 : 0, total: 1,  reward: '+1 молоток',
-        onClaim: () => { this.hammerCount += 1; this.updateButtons(); try { saveData('hammers', this.hammerCount); } catch {}; this.playSfx('claim'); } },
+        onClaim: () => { this.hammerCount += 1; this.updateBonusUI(); try { saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}); } catch {}; this.playSfx('claim'); } },
       { key: 'merge10',title: 'Сделай 10 слияний', progress: Math.min(d.merges, 10), total: 10, reward: '+3 отмены',
         onClaim: () => { this.undoCount += 3; this.updateButtons(); this.playSfx('claim'); } },
       { key: 'tile128',title: 'Собери плитку 128', progress: d.maxTile >= 128 ? 1 : 0, total: 1,  reward: '+500 очков',
@@ -438,13 +535,7 @@ export default class GameScene extends Phaser.Scene {
   });
 
   const btnAds  = this.createButton(box.x, btnY2, btnW, btnH, 'Получить 🛠 (реклама)', async ()=>{
-    const ok = await showRewarded();
-    if (!ok) return;
-    this.hammerCount += 1;
-    try { saveData('hammers', this.hammerCount); } catch {}
-    this.updateButtons();
-    this.flashStatus('+1 молоток');
-    this.playSfx('claim');
+    await this.getBonusViaAd('hammer');
   });
 
   cont.add([lblMusic, togMusic, lblSfx, togSfx, btnNick.container, btnAds.container]);
@@ -605,8 +696,10 @@ export default class GameScene extends Phaser.Scene {
     const moved = await this.slide(dir);
     if (moved) {
       this.playSfx('move');
-      this.spawnRandomTile();
+      const skipSpawn = this.doubleTurns > 1;
+      if (!skipSpawn) this.spawnRandomTile();
       this.afterMove();
+      if (this.doubleTurns > 0) this.doubleTurns--; 
       if (this.isGameOver()) {
         await this.onGameOver();
         this.isMoving = false;
@@ -639,52 +732,58 @@ export default class GameScene extends Phaser.Scene {
 
     for (let li = 0; li < GRID; li++) {
       const idx = line(li);
-      const tiles = [];
+      const movable = [];
+      const frozen = {};
       for (let i = 0; i < idx.length; i++) {
         const t = this.grid[idx[i].r][idx[i].c];
-        if (t) tiles.push(t);
+        if (!t) continue;
+        if (t.freezeTurns > 0) frozen[i] = t; else movable.push({ tile: t, pos: i });
       }
       const out = new Array(GRID).fill(null);
+      Object.keys(frozen).forEach(p => { out[p] = frozen[p]; });
       let dst = 0;
-
-      for (let i = 0; i < tiles.length; i++) {
-        const t = tiles[i];
-        if (i < tiles.length - 1 && tiles[i + 1].value === t.value) {
-          const keep = t, kill = tiles[i + 1];
-          keep.value *= 2;
-          this.addScore(keep.value);
-          this.mergesThisRun++;
-          this.maxTileThisRun = Math.max(this.maxTileThisRun, keep.value);
-
-          const tp = idx[dst];
-          out[dst] = keep;
-          const pKeep = this.xyToPixel(tp.r, tp.c);
-
-          if (Math.abs(keep.container.x - pKeep.x) > 1 || Math.abs(keep.container.y - pKeep.y) > 1) {
-            tweens.push(this.tweenMoveTo(keep.container, pKeep.x, pKeep.y));
+      for (let i = 0; i < movable.length; i++) {
+        while (frozen.hasOwnProperty(dst)) dst++;
+        const curr = movable[i];
+        let merged = false;
+        if (i < movable.length - 1) {
+          const next = movable[i + 1];
+          let barrier = false;
+          for (let b = curr.pos + 1; b <= next.pos; b++) if (frozen.hasOwnProperty(b)) { barrier = true; break; }
+          if (!barrier && next.tile.value === curr.tile.value) {
+            const keep = curr.tile, kill = next.tile;
+            keep.value *= 2;
+            this.addScore(keep.value);
+            this.mergesThisRun++;
+            this.maxTileThisRun = Math.max(this.maxTileThisRun, keep.value);
+            const tp = idx[dst];
+            out[dst] = keep;
+            const pKeep = this.xyToPixel(tp.r, tp.c);
+            if (Math.abs(keep.container.x - pKeep.x) > 1 || Math.abs(keep.container.y - pKeep.y) > 1) {
+              tweens.push(this.tweenMoveTo(keep.container, pKeep.x, pKeep.y));
+              any = true;
+            }
+            tweens.push(this.tweenMoveTo(kill.container, pKeep.x, pKeep.y, () => {
+              kill.destroyed = true; kill.container.destroy(); this.tiles.delete(kill);
+            }));
             any = true;
+            if (keep.value >= 2048) { const pos = this.xyToPixel(tp.r, tp.c); this.emitFireworks(pos.x, pos.y); }
+            this.playSfx('merge');
+            this.tweens.add({ targets: keep.container, scale: 1.08, yoyo: true, duration: THEME.motion.merge });
+            i++; merged = true;
           }
-          tweens.push(this.tweenMoveTo(kill.container, pKeep.x, pKeep.y, () => {
-            kill.destroyed = true; kill.container.destroy(); this.tiles.delete(kill);
-          }));
-          any = true;
-
-          if (keep.value >= 2048) { const pos = this.xyToPixel(tp.r, tp.c); this.emitFireworks(pos.x, pos.y); }
-          this.playSfx('merge');
-          this.tweens.add({ targets: keep.container, scale: 1.08, yoyo: true, duration: THEME.motion.merge });
-          i++; dst++;
-        } else {
-          const tp = idx[dst];
-          out[dst] = t;
-          const p = this.xyToPixel(tp.r, tp.c);
-          if (Math.abs(t.container.x - p.x) > 1 || Math.abs(t.container.y - p.y) > 1) {
-            tweens.push(this.tweenMoveTo(t.container, p.x, p.y));
-            any = true;
-          }
-          dst++;
         }
+        if (!merged) {
+          const tp = idx[dst];
+          out[dst] = curr.tile;
+          const p = this.xyToPixel(tp.r, tp.c);
+          if (Math.abs(curr.tile.container.x - p.x) > 1 || Math.abs(curr.tile.container.y - p.y) > 1) {
+            tweens.push(this.tweenMoveTo(curr.tile.container, p.x, p.y));
+            any = true;
+          }
+        }
+        dst++;
       }
-
       for (let j = 0; j < GRID; j++) {
         const cell = idx[j];
         const tile = out[j];
@@ -763,17 +862,18 @@ export default class GameScene extends Phaser.Scene {
     this.grid[r][c] = null;
     this.hammerCount--;
     this.hammerMode = false;
-    this.updateButtons();
-    try { saveData('hammers', this.hammerCount); } catch {}
+    this.updateBonusUI();
+    try { saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}); } catch {}
     this.tiles.forEach(t=>t.highlight.setFillStyle(0xffffff,0.15));
     this.flashStatus('Плитка удалена');
+    this.cameras.main.shake(80,0.01);
+    const p=this.add.particles('spark');
+    p.createEmitter({x:tile.container.x,y:tile.container.y,speed:{min:40,max:120},lifespan:300,quantity:8,scale:{start:1,end:0},blendMode:'ADD'});
+    this.time.delayedCall(300,()=>p.destroy());
     this.playSfx('hammer');
   }
 
   toggleHammerMode() {
-    if (this.hammerCount <= 0) {
-      this.flashStatus('Нет молотков'); this.playSfx('error'); return;
-    }
     this.hammerMode = !this.hammerMode;
     this.tiles.forEach(t=>{
       t.highlight.setFillStyle(this.hammerMode ? THEME.glow.color : 0xffffff,
@@ -781,6 +881,20 @@ export default class GameScene extends Phaser.Scene {
     });
     this.flashStatus(this.hammerMode ? 'Молоток активен: тап по плитке' : 'Молоток выключен');
     this.playSfx('toggle');
+  }
+
+  applyFreeze(){
+    const arr=Array.from(this.tiles).filter(t=>!t.destroyed && !t.freezeTurns);
+    if(!arr.length) return;
+    const tile=Phaser.Utils.Array.GetRandom(arr);
+    tile.freezeTurns=3;
+    tile.freezeOverlay=this.add.graphics();
+    tile.freezeOverlay.lineStyle(3,0x99dfff,0.8);
+    tile.freezeOverlay.strokeRoundedRect(-TILE/2,-TILE/2,TILE,TILE,THEME.glass.radius);
+    tile.freezeOverlay.fillStyle(0x99dfff,0.2);
+    tile.freezeOverlay.fillRoundedRect(-TILE/2,-TILE/2,TILE,TILE,THEME.glass.radius);
+    tile.container.add(tile.freezeOverlay);
+    this.flashStatus('Плитка заморожена');
   }
 
   afterMove() {
@@ -791,6 +905,19 @@ export default class GameScene extends Phaser.Scene {
     if (BONUS_CONFIG.hintEvery && this.moveCount % BONUS_CONFIG.hintEvery === 0) {
       this.showHint();
     }
+    if (BONUS_CONFIG.freezeEvery && this.moveCount % BONUS_CONFIG.freezeEvery === 0) {
+      this.freezeCount++; this.updateBonusUI(); this.flashStatus('Бонус ❄');
+      saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}).catch(()=>{});
+    }
+    if (BONUS_CONFIG.doubleEvery && this.moveCount % BONUS_CONFIG.doubleEvery === 0) {
+      this.doubleCount++; this.updateBonusUI(); this.flashStatus('Бонус ⏩');
+      saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}).catch(()=>{});
+    }
+    this.tiles.forEach(t=>{
+      if(t.freezeTurns){
+        t.freezeTurns--; if(t.freezeTurns<=0){ t.freezeOverlay?.destroy(); delete t.freezeOverlay; }
+      }
+    });
   }
 
   rerollRandomTile() {
@@ -1116,14 +1243,23 @@ export default class GameScene extends Phaser.Scene {
     try {
       const saved = await loadData('bestScore');
       if (typeof saved === 'number') this.bestScore = Math.max(this.bestScore, saved | 0);
-      const h = await loadData('hammers');
-      if (typeof h === 'number') this.hammerCount = h | 0;
+      const bonuses = await loadData('bonuses');
+      if (bonuses){
+        if (typeof bonuses.hammers === 'number') this.hammerCount = bonuses.hammers|0;
+        if (typeof bonuses.freezes === 'number') this.freezeCount = bonuses.freezes|0;
+        if (typeof bonuses.doubles === 'number') this.doubleCount = bonuses.doubles|0;
+      } else {
+        const h = await loadData('hammers');
+        if (typeof h === 'number') this.hammerCount = h | 0;
+      }
       const stgCloud = await loadData('settings');
       if (stgCloud && typeof stgCloud.musicOn === 'boolean') this.musicOn = stgCloud.musicOn;
       if (stgCloud && typeof stgCloud.sfxOn === 'boolean') this.sfxOn = stgCloud.sfxOn;
       const local = JSON.parse(localStorage.getItem('yag-2048-save-v1') || '{}');
       if (local && typeof local.bestScore === 'number') this.bestScore = Math.max(this.bestScore, local.bestScore | 0);
       if (local && typeof local.hammers === 'number') this.hammerCount = local.hammers | 0;
+      if (local && typeof local.freezes === 'number') this.freezeCount = local.freezes | 0;
+      if (local && typeof local.doubles === 'number') this.doubleCount = local.doubles | 0;
       const stg = JSON.parse(localStorage.getItem('yag-2048-settings') || '{}');
       if (typeof stg.musicOn === 'boolean') this.musicOn = stg.musicOn;
       if (typeof stg.sfxOn === 'boolean') this.sfxOn = stg.sfxOn;
@@ -1132,9 +1268,9 @@ export default class GameScene extends Phaser.Scene {
   async saveProgress() {
     try {
       await saveData('bestScore', this.bestScore);
-      await saveData('hammers', this.hammerCount);
+      await saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});
     } catch (e) {}
-    localStorage.setItem('yag-2048-save-v1', JSON.stringify({ bestScore: this.bestScore, hammers: this.hammerCount }));
+    localStorage.setItem('yag-2048-save-v1', JSON.stringify({ bestScore: this.bestScore, hammers: this.hammerCount, freezes: this.freezeCount, doubles: this.doubleCount }));
   }
 
   updateUI() {
@@ -1148,6 +1284,7 @@ export default class GameScene extends Phaser.Scene {
     }
     if (this.bestText)  this.bestText.setText('Рекорд: ' + this.bestScore);
     this.updateButtons();
+    this.updateBonusUI();
   }
 }
 
