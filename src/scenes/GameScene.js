@@ -27,6 +27,11 @@ const DEFAULT_MUSIC_ON = true;
 const DEFAULT_SFX_ON = true;
 
 const BONUS_CONFIG = { hintEvery: 30, rerollEvery: 20, freezeEvery: 20, doubleEvery: 50 };
+const DAILY_TEMPLATES = [
+  { type:'tile256', title:'Собери 256', target:1 },
+  { type:'merge10', title:'Сделай 10 слияний за игру', target:10 },
+  { type:'score2000', title:'Набери 2000 очков', target:2000 }
+];
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -57,6 +62,10 @@ export default class GameScene extends Phaser.Scene {
 
     this.doubleCount = 0;
     this.doubleTurns = 0;
+
+    this.swapCount = 0;
+    this.swapMode = false;
+    this.swapFirst = null;
 
     this.moveCount = 0;
 
@@ -109,13 +118,13 @@ export default class GameScene extends Phaser.Scene {
 
     const W = this.scale.width, H = this.scale.height;
     this.centerX = W / 2;
-    this.topY = Math.max(80, (H - BOARD_H) / 2 - 16);
 
     const bg = drawGradientRect(this, W / 2, H / 2, W, H, THEME.bgGradient);
     bg.setDepth(-1000);
 
     this.createSparkTexture();
     this.buildHUD();
+    this.boardContainer = this.add.container(0, 0).setDepth(this.boardDepth);
     this.drawBoard();
     this.initGrid();
     for (let i = 0; i < START_TILES; i++) this.spawnRandomTile();
@@ -126,7 +135,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.layoutHUD();
     this.layoutButtonsUnderBoard();
-    this.scale.on('resize', () => this.layoutHUD());
+    this.scale.on('resize', () => { this.layoutHUD(); this.layoutButtonsUnderBoard(); });
     this.initInput();
     this.initAudio(); if (this.musicOn) this.deferStartMusic();
 
@@ -139,6 +148,12 @@ export default class GameScene extends Phaser.Scene {
       delay: X2_SPAWN_EVERY_SEC * 1000,
       loop: true,
       callback: () => this.spawnX2Bonus()
+    });
+
+    this.events.once('shutdown', () => {
+      try{ this.hud.destroy(true); }catch{}
+      try{ this.boardContainer.destroy(true); }catch{}
+      this.tiles.forEach(t=>{ try{ t.container.destroy(); }catch{} });
     });
   }
 
@@ -165,6 +180,7 @@ export default class GameScene extends Phaser.Scene {
   /* -------------------- UI -------------------- */
   buildHUD(){
     this.hud = this.add.container(0,0).setDepth(this.uiDepth);
+    this.hud.setScrollFactor(0);
 
     this.title = addTitleWithShine(this, 0, 0, '2048: Elements', { shiny: false });
     this.hud.add(this.title);
@@ -188,11 +204,11 @@ export default class GameScene extends Phaser.Scene {
     const items = [
       {icon:'🛠', label:'Молоток', key:'hammer'},
       {icon:'❄', label:'Заморозка', key:'freeze'},
-      {icon:'⏩', label:'Двойной ход', key:'double'}
+      {icon:'⏩', label:'Двойной ход', key:'double'},
+      {icon:'↔', label:'Swap', key:'swap'}
     ];
-    items.forEach((it,i)=>{
+    items.forEach(it=>{
       const btn = this.makeBonusButton(it);
-      btn.container.y = i*48;
       this.bonusPanel.add(btn.container);
       this.bonusButtons[it.key] = btn;
     });
@@ -200,55 +216,96 @@ export default class GameScene extends Phaser.Scene {
   }
 
   makeBonusButton({icon,label,key}){
-    const w=160,h=40;
     const cont = this.add.container(0,0);
-    const tex=`bonus-${w}x${h}`;
-    if(!this.textures.exists(tex)){
-      const g=this.add.graphics();
-      g.fillStyle(THEME.button.fill,1);
-      g.lineStyle(2,THEME.button.stroke,1);
-      g.fillRoundedRect(0,0,w,h,THEME.button.radius);
-      g.strokeRoundedRect(0,0,w,h,THEME.button.radius);
-      g.generateTexture(tex,w,h); g.destroy();
-    }
-    const bg=this.add.image(0,0,tex).setOrigin(0.5).setInteractive({useHandCursor:true});
-    const iconT=makeText(this,-w/2+20,0,icon,'body').setOrigin(0.5);
-    const labelT=makeText(this,-w/2+40,0,label,'body').setOrigin(0,0.5);
-    const pill=this.add.graphics();
-    pill.fillStyle(THEME.button.fillActive,1);
-    pill.lineStyle(1,THEME.button.stroke,1);
-    pill.fillRoundedRect(-14,-10,28,20,10);
-    pill.x=w/2-20; pill.y=0;
-    const countT=makeText(this,w/2-20,0,'0','subtle').setOrigin(0.5).setColor('#fff');
-    cont.add([bg,iconT,labelT,pill,countT]);
-    cont.setSize(w,h);
+    const bg = this.add.rectangle(0,0,180,38,THEME.button.fill)
+      .setStrokeStyle(2,THEME.button.stroke)
+      .setInteractive({useHandCursor:true});
+    const iconT = makeText(this,0,0,icon,'body').setOrigin(0.5,0.5);
+    const labelT = makeText(this,0,0,label,'body').setOrigin(0,0.5);
+    const countBg = this.add.graphics();
+    countBg.fillStyle(THEME.button.fillActive,1);
+    countBg.lineStyle(1,THEME.button.stroke,1);
+    countBg.fillRoundedRect(-14,-10,28,20,10);
+    const countT = makeText(this,0,0,'0','subtle').setOrigin(0.5).setColor('#fff');
+    cont.add([bg,iconT,labelT,countBg,countT]);
+    cont.setSize(180,38);
     bg.on('pointerover',()=>{
       this.tweens.add({targets:cont,scale:1.03,duration:THEME.motion.micro});
-      bg.setTint(THEME.glow.color);
+      bg.setFillStyle(THEME.button.fillActive);
     });
     bg.on('pointerout',()=>{
       this.tweens.add({targets:cont,scale:1,duration:THEME.motion.micro});
-      bg.clearTint();
+      bg.setFillStyle(THEME.button.fill);
     });
     bg.on('pointerup',()=>{ this.playSfx('click'); this.activateBonus(key); });
-    return {container:cont,countText:countT,rect:bg};
+    return {container:cont,bg:bg,icon:iconT,label:labelT,countBg:countBg,countText:countT};
   }
 
   layoutHUD(){
-    const W=this.scale.width; const pad=12; const center=W/2; this.centerX=center;
-    const small=W<500; const scale=small?0.85:1;
-    const titleY=pad+24; this.title.setPosition(center,titleY); this.title.setScale(scale);
-    this.nickText.setPosition(center,pad); this.nickText.setScale(scale);
-    const scoreW=Math.min(W*0.8,460); const scoreY=titleY+40;
-    this.scorePanel.setPosition(center,scoreY); this.scorePanel.setScale(scoreW/460,1);
-    this.scoreText.setPosition(center-scoreW/2+12,scoreY); this.scoreText.setScale(scale);
-    this.bestText.setPosition(center+scoreW/2-12,scoreY); this.bestText.setScale(scale);
-    this.statusText.setPosition(center,scoreY+36); this.statusText.setScale(scale);
-    this.bonusPanel.x=W-pad-80; this.bonusPanel.y=pad; this.bonusPanel.setScale(scale);
+    const pad = 12;
+    const vw = this.scale.width, vh = this.scale.height;
+    this.centerX = vw/2;
+    const compact = vw < 520;
+    const bonusW = compact ? 44 : 180;
+    const btnH = compact ? 44 : 38;
+    const gap = compact ? 10 : 8;
+    const items = compact ? 3 : 4;
+    const bonusH = btnH * items + gap * (items - 1);
+
+    const titleText = this.title.list ? this.title.list[0] : this.title;
+    titleText.setFontSize(compact ? 26 : 34);
+    this.title.setPosition(Math.round(vw/2), Math.round(pad + titleText.displayHeight/2));
+
+    this.bonusPanel.setSize(bonusW, bonusH);
+    this.bonusPanel.setPosition(Math.round(vw - pad - bonusW/2), Math.round(pad + btnH/2));
+
+    const sbH = compact ? 46 : 54;
+    const sbW = Math.min(880, vw - pad*2);
+    const bottomTitle = this.title.y + titleText.displayHeight/2;
+    const bpBounds = this.bonusPanel.getBounds();
+    const topSafeBottom = Math.max(bottomTitle, bpBounds.bottom);
+    this.scorePanel.setPosition(Math.round(vw/2), Math.round(topSafeBottom + pad + sbH/2));
+    this.scorePanel.setScale(sbW/460, sbH/48);
+    this.scoreText.setPosition(Math.round(this.scorePanel.x - sbW/2 + 16), Math.round(this.scorePanel.y));
+    this.bestText.setPosition(Math.round(this.scorePanel.x + sbW/2 - 16), Math.round(this.scorePanel.y));
+
+    const boardTop = this.scorePanel.getBounds().bottom + pad;
+    this.boardContainer.setPosition(Math.round((vw - BOARD_W)/2), Math.round(boardTop));
+    this.topY = boardTop;
+
+    // layout bonus buttons
+    const keys = ['hammer','freeze','double','swap'];
+    let idx = 0;
+    keys.forEach(k => {
+      const btn = this.bonusButtons[k];
+      if(!btn) return;
+      const show = compact ? (k !== 'swap') : true;
+      btn.container.setVisible(show);
+      if(show){
+        const w = bonusW, h = btnH;
+        btn.container.setPosition(0, Math.round(idx*(btnH+gap)));
+        btn.bg.setDisplaySize(w,h);
+        btn.container.setSize(w,h);
+        if(compact){
+          btn.icon.setPosition(0, h/2);
+          btn.label.setVisible(false);
+          btn.countBg.setPosition(w/2 - 14, h/2);
+          btn.countText.setPosition(w/2 - 14, h/2);
+        } else {
+          btn.icon.setPosition(-w/2 + 20, h/2);
+          btn.label.setVisible(true);
+          btn.label.setPosition(-w/2 + 40, h/2);
+          btn.label.setWordWrapWidth(w - 54);
+          btn.countBg.setPosition(w/2 - 20, h/2);
+          btn.countText.setPosition(w/2 - 20, h/2);
+        }
+        idx++;
+      }
+    });
   }
 
   updateBonusUI(){
-    const map={hammer:this.hammerCount, freeze:this.freezeCount, double:this.doubleCount};
+    const map={hammer:this.hammerCount, freeze:this.freezeCount, double:this.doubleCount, swap:this.swapCount};
     for(const k in map){
       const b=this.bonusButtons[k];
       if(!b) continue;
@@ -263,9 +320,11 @@ export default class GameScene extends Phaser.Scene {
     if(type==='hammer') this.hammerCount+=amount;
     if(type==='freeze') this.freezeCount+=amount;
     if(type==='double') this.doubleCount+=amount;
-    await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});
+    if(type==='swap') this.swapCount+=amount;
+    await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount});
     this.updateBonusUI();
-    this.flashStatus('+'+amount+' '+(type==='hammer'?'🛠':type==='freeze'?'❄':'⏩'));
+    const iconMap = {hammer:'🛠',freeze:'❄',double:'⏩',swap:'↔'};
+    this.flashStatus('+'+amount+' '+iconMap[type]);
     return true;
   }
 
@@ -276,18 +335,29 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
     if(key==='freeze'){
-      if(this.freezeCount>0){ this.freezeCount--; this.applyFreeze(); this.updateBonusUI(); try{await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});}catch{} }
+      if(this.freezeCount>0){ this.freezeCount--; this.applyFreeze(); this.updateBonusUI(); try{await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount});}catch{} }
       else await this.getBonusViaAd('freeze');
       return;
     }
     if(key==='double'){
-      if(this.doubleCount>0 && this.doubleTurns===0){ this.doubleCount--; this.doubleTurns=2; this.updateBonusUI(); try{await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});}catch{} this.flashStatus('Двойной ход активен'); }
+      if(this.doubleCount>0 && this.doubleTurns===0){ this.doubleCount--; this.doubleTurns=2; this.updateBonusUI(); try{await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount});}catch{} this.flashStatus('Двойной ход активен'); }
       else if(this.doubleCount<=0){ await this.getBonusViaAd('double'); }
+      return;
+    }
+    if(key==='swap'){
+      if(this.swapCount>0){
+        this.swapMode=true; this.swapFirst=null;
+        this.tiles.forEach(t=> t.highlight.setFillStyle(THEME.glow.color, THEME.glow.alpha*0.5));
+        this.flashStatus('Swap: выбери две плитки');
+      }
+      else await this.getBonusViaAd('swap');
+      this.updateBonusUI();
+      return;
     }
   }
 
   layoutButtonsUnderBoard() {
-    const y = this.topY + BOARD_H + 48;
+    const y = this.boardContainer.y + BOARD_H + 48;
     this.buttonsGroup = this.add.container(this.centerX, y).setDepth(this.uiDepth);
 
     const bw = 132, bh = 44, space = 16;
@@ -368,15 +438,15 @@ export default class GameScene extends Phaser.Scene {
     const boxW = 440, boxH = 520;
     const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2,
       this.scale.width, this.scale.height, 0x000000).setAlpha(0.6).setInteractive();
-    const box = this.add.rectangle(this.centerX, this.topY + 30, boxW, boxH, 0x1b2330)
+    const box = this.add.rectangle(this.centerX, this.boardContainer.y + 30, boxW, boxH, 0x1b2330)
       .setStrokeStyle(2, 0x2a3547).setOrigin(0.5, 0);
     const title = makeText(this, box.x, box.y + 16, 'Меню', 'h2').setOrigin(0.5, 0);
     const content = this.add.container(0, 0);
 
     this.menuLayer.add([overlay, box, title, content]);
 
-    const tabs = ['Рейтинг', 'Задания', 'Настройки'];
-    let active = 1; // по умолчанию «Задания»
+    const tabs = ['Рейтинг', 'Задача', 'Настройки'];
+    let active = 1;
     const tabW = 120, gap = 10, pad = 14, startX = box.x - boxW / 2 + pad + tabW / 2;
 
     const draw = () => {
@@ -391,7 +461,7 @@ export default class GameScene extends Phaser.Scene {
         content.add([r, t]);
       }
       if (active === 0) this.fillLeaderboard(content, box);
-      if (active === 1) this.fillQuests(content, box);
+      if (active === 1) this.fillDailyQuest(content, box);
       if (active === 2) this.fillSettings(content, box);
     };
     draw();
@@ -432,127 +502,99 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  fillQuests(cont, box) {
+  fillDailyQuest(cont, box){
     const d = this.loadDaily();
-    cont.add(makeText(this, box.x, box.y + 96, 'Ежедневные задания', 'body').setOrigin(0.5,0));
+    const tpl = DAILY_TEMPLATES.find(t=>t.type===d.type);
+    cont.add(makeText(this, box.x, box.y + 96, 'Задача дня', 'body').setOrigin(0.5,0));
 
-    const items = [
-      { key: 'play1',  title: 'Сыграй 1 партию',   progress: d.played ? 1 : 0, total: 1,  reward: '+1 молоток',
-        onClaim: () => { this.hammerCount += 1; this.updateBonusUI(); try { saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}); } catch {}; this.playSfx('claim'); } },
-      { key: 'merge10',title: 'Сделай 10 слияний', progress: Math.min(d.merges, 10), total: 10, reward: '+3 отмены',
-        onClaim: () => { this.undoCount += 3; this.updateButtons(); this.playSfx('claim'); } },
-      { key: 'tile128',title: 'Собери плитку 128', progress: d.maxTile >= 128 ? 1 : 0, total: 1,  reward: '+500 очков',
-        onClaim: () => { this.addScore(500); this.playSfx('claim'); } }
-    ];
+    const cardW = box.displayWidth - 60, cardH = 86, x = box.x - cardW/2, y = box.y + 140;
+    const card = makeGlassPanel(this, box.x, y + cardH/2, cardW, cardH);
+    const title = makeText(this, x + 14, y + 12, tpl.title, 'body').setOrigin(0,0);
+    const rewardTxt = d.reward === 'hammer' ? '+1 🛠' : '+1 ❄';
+    const reward = makeText(this, x + 14, y + 36, 'Награда: ' + rewardTxt, 'subtle').setOrigin(0,0);
 
-    const cardW = box.displayWidth - 60, cardH = 86, startY = box.y + 140, x = box.x - cardW / 2;
-    let y = startY;
+    const target = tpl.target;
+    const prog = Math.min(d.progress, target);
+    const p = prog / target;
+    const pbX = x + 14, pbY = y + 60, pbW = cardW - 14 - 140, pbH = 12;
+    const pbBg = this.add.rectangle(pbX + pbW/2, pbY, pbW, pbH, 0x233042);
+    const pbFill = this.add.rectangle(pbX + pbW*p/2, pbY, pbW*p, pbH, 0x6aba46);
 
-    for (let idx = 0; idx < items.length; idx++) {
-      const it = items[idx];
-      const p = it.progress / it.total;
-      const complete = p >= 1;
-      const claimed = d.claimed && d.claimed[it.key];
+    const btn = this.createButton(x + cardW - 80, pbY, 120,34,
+      d.claimed ? 'Забрано' : (d.done ? 'Забрать' : 'Недоступно'), async () => {
+        if(!d.done || d.claimed) return;
+        if(d.reward === 'hammer') this.hammerCount++; else this.freezeCount++;
+        this.updateBonusUI();
+        d.claimed = true; this.saveDaily(d);
+        await saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount});
+        cont.removeAll(true); this.fillDailyQuest(cont, box);
+      });
+    if(!d.done || d.claimed){ btn.rect.fillColor = 0x2a2f3f; btn.rect.disableInteractive(); }
 
-      const card = makeGlassPanel(this, box.x, y + cardH / 2, cardW, cardH);
-      const title = makeText(this, x + 14, y + 12, it.title, 'body').setOrigin(0,0);
-      const reward = makeText(this, x + 14, y + 36, 'Награда: ' + it.reward, 'subtle').setOrigin(0,0);
-
-      const pbX = x + 14, pbY = y + 60, pbW = cardW - 14 - 140, pbH = 12;
-      const pbBg = this.add.rectangle(pbX + pbW / 2, pbY, pbW, pbH, 0x233042);
-      const pbFillW = Math.round(pbW * Math.min(1, p));
-      const pbFill = this.add.rectangle(pbX + pbFillW / 2, pbY, pbFillW, pbH, 0x6aba46);
-
-      const btn = this.createButton(x + cardW - 80, pbY, 120, 34,
-        claimed ? 'Забрано' : (complete ? 'Забрать' : 'Недоступно'),
-        () => {
-          if (!complete || claimed) return;
-          it.onClaim();
-          if (!d.claimed) d.claimed = {};
-          d.claimed[it.key] = true;
-          this.saveDaily(d);
-          cont.removeAll(true);
-          this.fillQuests(cont, box);
-        });
-      if (!complete || claimed) {
-        btn.rect.fillColor = 0x2a2f3f;
-        btn.rect.disableInteractive();
-      }
-
-      cont.add([card, title, reward, pbBg, pbFill, btn.container]);
-      y += cardH + 14;
-    }
-
-    cont.add(makeText(this, box.x, y + 4, 'Ежедневные задания обновляются раз в день', 'subtle').setOrigin(0.5,0));
+    cont.add([card,title,reward,pbBg,pbFill,btn.container]);
+    cont.add(makeText(this, box.x, y + cardH + 4, 'Новая задача каждый день', 'subtle').setOrigin(0.5,0));
   }
 
   // Настройки с «пилюльными» тумблерами
   fillSettings(cont, box){
-  const xLabel = box.x - 140;     // колонка подписей
-  const xToggle = box.x + 110;    // колонка тумблеров
-  const y0 = box.y + 150, step = 60;
+    const tabs=['Игра','Справка'];
+    let active=0; const tabW=120,gap=10,startX=box.x - tabW - gap;
+    const inner=this.add.container(0,0); cont.add(inner);
 
-  // Локальный хелпер: «пилюля» с бегунком
-  const makePillToggle = (cx, cy, state, onChange) => {
-    const w=92, h=34, r=17;
-    const contT = this.add.container(cx, cy);
-    const g = this.add.graphics(); contT.add(g);
-
-    const knob = this.add.circle(0, 0, r-3, 0xffffff).setStrokeStyle(2, 0x3a4c6a);
-    contT.add(knob);
-
-    const draw = () => {
-      g.clear();
-      g.lineStyle(2, 0x3a4c6a, 1);
-      g.fillStyle(state ? 0x2c7e79 : 0x5a6374, 1);
-      g.fillRoundedRect(-w/2, -h/2, w, h, r);
-      g.strokeRoundedRect(-w/2, -h/2, w, h, r);
-      knob.x = state ? (w/2 - r) : (-w/2 + r);
+    const drawTabs=()=>{
+      cont.removeAll(true); cont.add(inner);
+      for(let i=0;i<tabs.length;i++){
+        const on=i===active; const cx=startX + i*(tabW+gap);
+        const r=this.add.rectangle(cx, box.y+96, tabW,32,on?0x2b3a52:0x253145)
+          .setStrokeStyle(2,0x3a4c6a).setInteractive({useHandCursor:true});
+        const t=makeText(this,cx,box.y+96,tabs[i],'body').setOrigin(0.5);
+        r.on('pointerup',()=>{this.playSfx('click');active=i;drawTabs();});
+        cont.add([r,t]);
+      }
+      inner.removeAll(true);
+      if(active===0) drawGame(); else drawHelp();
     };
-    draw();
 
-    const zone = this.add.zone(0,0,w,h).setInteractive({ useHandCursor:true });
-    zone.on('pointerup', ()=>{ this.playSfx('click'); state=!state; onChange(state); draw(); });
-    contT.add(zone);
+    const drawGame=()=>{
+      const xLabel = box.x - 140;
+      const xToggle = box.x + 110;
+      const y0 = box.y + 150, step = 60;
+      const makePillToggle = (cx, cy, state, onChange) => {
+        const w=92, h=34, r=17; const contT=this.add.container(cx,cy); const g=this.add.graphics(); contT.add(g);
+        const knob=this.add.circle(0,0,r-3,0xffffff).setStrokeStyle(2,0x3a4c6a); contT.add(knob);
+        const draw=()=>{ g.clear(); g.lineStyle(2,0x3a4c6a,1); g.fillStyle(state?0x2c7e79:0x5a6374,1); g.fillRoundedRect(-w/2,-h/2,w,h,r); g.strokeRoundedRect(-w/2,-h/2,w,h,r); knob.x=state?(w/2-r):(-w/2+r); };
+        draw(); const zone=this.add.zone(0,0,w,h).setInteractive({useHandCursor:true});
+        zone.on('pointerup',()=>{this.playSfx('click');state=!state;onChange(state);draw();}); contT.add(zone); return contT;
+      };
+      const lblMusic = makeText(this, xLabel, y0, 'Музыка', 'body').setOrigin(1,0.5);
+      const togMusic = makePillToggle(xToggle, y0, this.musicOn, (v)=>{ this.musicOn=v; if(v) this.startMusic(); else this.stopMusic(); this.saveSettings(); });
+      const lblSfx = makeText(this, xLabel, y0+step, 'Звуки', 'body').setOrigin(1,0.5);
+      const togSfx = makePillToggle(xToggle, y0+step, this.sfxOn, (v)=>{ this.sfxOn=v; this.saveSettings(); });
+      inner.add([lblMusic,togMusic,lblSfx,togSfx]);
+    };
 
-    return contT;
-  };
+    const drawHelp=()=>{
+      const txt = `Бонусы\n— Молоток (🛠). Удаляет выбранную плитку. Очки не начисляются. Можно получить за рекламу или в редких событиях.\n— Заморозка (❄). Блокирует одну плитку на 3 хода — она не двигается и не сливается.\n— Двойной ход (⏩). Позволяет сделать два хода подряд: после первого хода новые плитки не появляются.\n— Swap (↔). Поменять местами две плитки. Не вызывает моментальных слияний.\n\nГеймплей\n— Комбо-множитель: ходы со слиянием повышают множитель очков до ×1.5; ход без слияния или применение бонуса — сброс.\n— Жёсткий режим: чаще появляется плитка «4» (30%).\n— Ежедневная задача: выполняйте цель дня и получайте бонус.`;
+      const t = makeText(this, box.x - box.displayWidth/2 + 20, box.y + 140, txt, 'body')
+        .setOrigin(0,0).setWordWrapWidth(box.displayWidth-40);
+      inner.add(t);
+    };
 
-  // Ряды «Музыка» / «Звуки»
-  const lblMusic = makeText(this, xLabel, y0, 'Музыка', 'body').setOrigin(1,0.5);
-  const togMusic = makePillToggle(xToggle, y0, this.musicOn, (v)=>{ this.musicOn=v; if(v) this.startMusic(); else this.stopMusic(); this.saveSettings(); });
-
-  const lblSfx = makeText(this, xLabel, y0+step, 'Звуки', 'body').setOrigin(1,0.5);
-  const togSfx = makePillToggle(xToggle, y0+step, this.sfxOn, (v)=>{ this.sfxOn=v; this.saveSettings(); });
-
-  // --- Кнопки вертикально по центру ---
-  const btnW = Math.min(280, box.displayWidth - 160); // безопасная ширина
-  const btnH = 36;
-  const btnY1 = y0 + step*2 + 10;       // Сменить ник
-  const btnY2 = btnY1 + btnH + 16;      // Получить молоток
-
-  const btnNick = this.createButton(box.x, btnY1, btnW, btnH, 'Сменить ник', ()=>{
-    const n=(prompt('Введите новый ник (2–16):', this.nickname||'Игрок')||'').trim().slice(0,16);
-    if(n.length>=2){ this.nickname=n; localStorage.setItem('yag-2048-nick',n); if (this.nickText) this.nickText.setText('👤 '+this.nickname); }
-  });
-
-  const btnAds  = this.createButton(box.x, btnY2, btnW, btnH, 'Получить 🛠 (реклама)', async ()=>{
-    await this.getBonusViaAd('hammer');
-  });
-
-  cont.add([lblMusic, togMusic, lblSfx, togSfx, btnNick.container, btnAds.container]);
-}
+    drawTabs();
+  }
 
 
   /* -------------------- Доска/логика -------------------- */
   drawBoard() {
-    const x0 = this.centerX - BOARD_W / 2, y0 = this.topY;
-    this.add.rectangle(this.centerX, y0 + BOARD_H / 2, BOARD_W, BOARD_H, 0x161d27)
-      .setStrokeStyle(3, 0x2a3547).setDepth(this.boardDepth);
+    this.boardContainer.removeAll(true);
+    const bg = this.add.rectangle(BOARD_W / 2, BOARD_H / 2, BOARD_W, BOARD_H, 0x161d27)
+      .setStrokeStyle(3, 0x2a3547);
+    this.boardContainer.add(bg);
     for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) {
-      const cx = x0 + GAP + c * (TILE + GAP) + TILE / 2;
-      const cy = y0 + GAP + r * (TILE + GAP) + TILE / 2;
-      this.add.rectangle(cx, cy, TILE, TILE, 0x1b2330).setAlpha(0.35).setDepth(this.boardDepth);
+      const cx = GAP + c * (TILE + GAP) + TILE / 2;
+      const cy = GAP + r * (TILE + GAP) + TILE / 2;
+      const cell = this.add.rectangle(cx, cy, TILE, TILE, 0x1b2330).setAlpha(0.35);
+      this.boardContainer.add(cell);
     }
   }
 
@@ -576,7 +618,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   xyToPixel(r, c) {
-    const x0 = this.centerX - BOARD_W / 2, y0 = this.topY;
+    const x0 = this.boardContainer.x, y0 = this.boardContainer.y;
     return { x: x0 + GAP + c * (TILE + GAP) + TILE / 2, y: y0 + GAP + r * (TILE + GAP) + TILE / 2 };
   }
 
@@ -601,7 +643,7 @@ export default class GameScene extends Phaser.Scene {
 
     const text = makeText(this, 0, -8, '' + value, 'title')
       .setOrigin(0.5).setColor(style.text)
-      .setFontSize(value >= 1024 ? 32 : value >= 128 ? 38 : 44);
+      .setFontSize(value >= 1024 ? 32 : value >= 128 ? 38 : 44).setDepth(10);
     const el = makeText(this, 0, TILE / 2 - 28, style.chip, 'body')
       .setOrigin(0.5).setFontSize(20).setColor(style.text);
 
@@ -614,10 +656,11 @@ export default class GameScene extends Phaser.Scene {
 
     cont.on('pointerup', () => {
       if (this.hammerMode && this.hammerCount > 0 && !this.isMoving && !this.isMenuOpen) this.useHammerOn(tile);
+      else if (this.swapMode && !this.isMoving && !this.isMenuOpen) this.useSwapOn(tile);
     });
 
     cont.on('pointerover', () => {
-      if (this.hammerMode) {
+      if (this.hammerMode || this.swapMode) {
         this.tweens.add({ targets: cont, scale: 1.03, duration: THEME.motion.micro, yoyo: true });
       }
     });
@@ -865,7 +908,7 @@ export default class GameScene extends Phaser.Scene {
     this.hammerCount--;
     this.hammerMode = false;
     this.updateBonusUI();
-    try { saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}); } catch {}
+    try { saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount}); } catch {}
     this.tiles.forEach(t=>t.highlight.setFillStyle(0xffffff,0.15));
     this.flashStatus('Плитка удалена');
     this.cameras.main.shake(80,0.01);
@@ -883,6 +926,29 @@ export default class GameScene extends Phaser.Scene {
     });
     this.flashStatus(this.hammerMode ? 'Молоток активен: тап по плитке' : 'Молоток выключен');
     this.playSfx('toggle');
+  }
+
+  useSwapOn(tile){
+    if(!this.swapMode) return;
+    if(!this.swapFirst){
+      this.swapFirst = tile;
+      tile.highlight.setFillStyle(THEME.glow.color, THEME.glow.alpha * 0.5);
+      this.flashStatus('Выберите вторую плитку');
+      return;
+    }
+    if(tile === this.swapFirst) return;
+    const a = this.swapFirst, b = tile;
+    const posA = { x: a.container.x, y: a.container.y, r: a.r, c: a.c };
+    const posB = { x: b.container.x, y: b.container.y, r: b.r, c: b.c };
+    this.grid[posA.r][posA.c] = b; b.r = posA.r; b.c = posA.c;
+    this.grid[posB.r][posB.c] = a; a.r = posB.r; a.c = posB.c;
+    this.tweenMoveTo(a.container, posB.x, posB.y);
+    this.tweenMoveTo(b.container, posA.x, posA.y);
+    this.tiles.forEach(t=>t.highlight.setFillStyle(0xffffff,0.15));
+    this.swapCount--; this.swapMode=false; this.swapFirst=null;
+    this.updateBonusUI();
+    try{ saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount}); }catch{}
+    this.flashStatus('Плитки обменены');
   }
 
   applyFreeze(){
@@ -909,17 +975,18 @@ export default class GameScene extends Phaser.Scene {
     }
     if (BONUS_CONFIG.freezeEvery && this.moveCount % BONUS_CONFIG.freezeEvery === 0) {
       this.freezeCount++; this.updateBonusUI(); this.flashStatus('Бонус ❄');
-      saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}).catch(()=>{});
+      saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount}).catch(()=>{});
     }
     if (BONUS_CONFIG.doubleEvery && this.moveCount % BONUS_CONFIG.doubleEvery === 0) {
       this.doubleCount++; this.updateBonusUI(); this.flashStatus('Бонус ⏩');
-      saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount}).catch(()=>{});
+      saveData('bonuses',{hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount}).catch(()=>{});
     }
     this.tiles.forEach(t=>{
       if(t.freezeTurns){
         t.freezeTurns--; if(t.freezeTurns<=0){ t.freezeOverlay?.destroy(); delete t.freezeOverlay; }
       }
     });
+    this.updateDailyProgress();
   }
 
   rerollRandomTile() {
@@ -1027,7 +1094,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   showGameOverOverlay(msg) {
-    const overlay = this.add.rectangle(this.centerX, this.topY + BOARD_H / 2, BOARD_W, BOARD_H, 0x000000)
+    const overlay = this.add.rectangle(this.centerX, this.boardContainer.y + BOARD_H / 2, BOARD_W, BOARD_H, 0x000000)
       .setAlpha(0.6).setInteractive().setDepth(this.overlayDepth);
     const box = makeGlassPanel(this, this.centerX, overlay.y, 320, 220).setDepth(this.overlayDepth + 1);
     const t = makeText(this, this.centerX, overlay.y - 50, msg || 'Игра окончена', 'h2')
@@ -1043,7 +1110,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   spawnX2Bonus() {
-    const x = this.centerX + BOARD_W / 2 - 24, y = this.topY - 10;
+    const x = this.centerX + BOARD_W / 2 - 24, y = this.boardContainer.y - 10;
     const r = this.add.circle(x, y, 18, 0xcc4566).setStrokeStyle(2, 0xffffff)
       .setInteractive({ useHandCursor: true }).setDepth(this.uiDepth);
     const t = makeText(this, x, y, 'x2', 'body').setOrigin(0.5).setDepth(this.uiDepth);
@@ -1141,16 +1208,28 @@ export default class GameScene extends Phaser.Scene {
   /* -------------------- Daily -------------------- */
   loadDaily() {
     const k = 'yag-2048-daily';
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0,10);
     const raw = JSON.parse(localStorage.getItem(k) || '{}');
-    if (raw.date !== today) {
-      const fresh = { date: today, played: false, merges: 0, maxTile: 2, claimed: {} };
+    if(raw.date !== today){
+      const tpl = Phaser.Utils.Array.GetRandom(DAILY_TEMPLATES);
+      const reward = Math.random()<0.5 ? 'hammer' : 'freeze';
+      const fresh = {date:today,type:tpl.type,progress:0,done:false,claimed:false,reward};
       localStorage.setItem(k, JSON.stringify(fresh));
       return fresh;
     }
     return raw;
   }
-  saveDaily(d) { localStorage.setItem('yag-2048-daily', JSON.stringify(d)); }
+  saveDaily(d){ localStorage.setItem('yag-2048-daily', JSON.stringify(d)); }
+
+  updateDailyProgress(){
+    const d = this.loadDaily();
+    if(d.done) return;
+    if(d.type==='tile256') d.progress = this.maxTileThisRun >= 256 ? 1 : 0;
+    if(d.type==='merge10') d.progress = Math.min(10, this.mergesThisRun);
+    if(d.type==='score2000') d.progress = this.score;
+    d.done = (d.type==='tile256'? d.progress>=1 : d.type==='merge10'? d.progress>=10 : d.progress>=2000);
+    this.saveDaily(d);
+  }
 
   /* -------------------- Audio -------------------- */
   initAudio() {
@@ -1250,6 +1329,7 @@ export default class GameScene extends Phaser.Scene {
         if (typeof bonuses.hammers === 'number') this.hammerCount = bonuses.hammers|0;
         if (typeof bonuses.freezes === 'number') this.freezeCount = bonuses.freezes|0;
         if (typeof bonuses.doubles === 'number') this.doubleCount = bonuses.doubles|0;
+        if (typeof bonuses.swaps === 'number') this.swapCount = bonuses.swaps|0;
       } else {
         const h = await loadData('hammers');
         if (typeof h === 'number') this.hammerCount = h | 0;
@@ -1262,6 +1342,7 @@ export default class GameScene extends Phaser.Scene {
       if (local && typeof local.hammers === 'number') this.hammerCount = local.hammers | 0;
       if (local && typeof local.freezes === 'number') this.freezeCount = local.freezes | 0;
       if (local && typeof local.doubles === 'number') this.doubleCount = local.doubles | 0;
+      if (local && typeof local.swaps === 'number') this.swapCount = local.swaps | 0;
       const stg = JSON.parse(localStorage.getItem('yag-2048-settings') || '{}');
       if (typeof stg.musicOn === 'boolean') this.musicOn = stg.musicOn;
       if (typeof stg.sfxOn === 'boolean') this.sfxOn = stg.sfxOn;
@@ -1270,9 +1351,9 @@ export default class GameScene extends Phaser.Scene {
   async saveProgress() {
     try {
       await saveData('bestScore', this.bestScore);
-      await saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount});
+      await saveData('bonuses', {hammers:this.hammerCount,freezes:this.freezeCount,doubles:this.doubleCount,swaps:this.swapCount});
     } catch (e) {}
-    localStorage.setItem('yag-2048-save-v1', JSON.stringify({ bestScore: this.bestScore, hammers: this.hammerCount, freezes: this.freezeCount, doubles: this.doubleCount }));
+    localStorage.setItem('yag-2048-save-v1', JSON.stringify({ bestScore: this.bestScore, hammers: this.hammerCount, freezes: this.freezeCount, doubles: this.doubleCount, swaps: this.swapCount }));
   }
 
   updateUI() {
