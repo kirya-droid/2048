@@ -1,7 +1,12 @@
 // src/scenes/GameScene.js
 import Phaser from 'phaser';
 import {
-  loadCloud, saveCloud, showRewarded, setLeaderboardScore, getPlayerName
+  loadCloud,
+  saveCloud,
+  showRewarded,
+  showInterstitial,
+  setLeaderboardScore,
+  getPlayerName
 } from '../sdk/yandex.js';
 
 const GRID = 4, TILE = 104, GAP = 10;
@@ -91,6 +96,8 @@ export default class GameScene extends Phaser.Scene {
     this.layoutButtonsUnderBoard();
     this.initInput();
     this.initAudio(); if (this.musicOn) this.deferStartMusic();
+
+    await showInterstitial();
 
     // страховка ввода
     this.allowInput = true;
