@@ -26,6 +26,8 @@ const X2_DURATION_SEC = 30;
 const DEFAULT_MUSIC_ON = true;
 const DEFAULT_SFX_ON = true;
 
+const BONUS_CONFIG = { hintEvery: 30, rerollEvery: 20 };
+
 export default class GameScene extends Phaser.Scene {
   constructor() {
     super('GameScene');
@@ -50,6 +52,8 @@ export default class GameScene extends Phaser.Scene {
 
     this.hammerCount = 0;
     this.hammerMode = false;
+
+    this.moveCount = 0;
 
     this.doubleActive = false;
     this.doubleUntil = 0;
@@ -151,29 +155,27 @@ export default class GameScene extends Phaser.Scene {
 
   /* -------------------- UI -------------------- */
   addHeader(){
-  this.title = addTitleWithShine(this, this.centerX, 42, '2048: Elements');
-  this.title.setDepth(this.uiDepth);
+    this.title = addTitleWithShine(this, this.centerX, 42, '2048: Elements', { shiny: false });
+    this.title.setDepth(this.uiDepth);
 
-  this.nickText = makeText(this, this.centerX, 14, '👤 ' + (this.nickname || ''), 'subtle')
+    this.nickText = makeText(this, this.centerX, 14, '👤 ' + (this.nickname || ''), 'subtle')
       .setOrigin(0.5).setDepth(this.uiDepth);
 
-  const panelY = 86, panelW = 460, panelH = 48;
-  this.scorePanel = makeGlassPanel(this, this.centerX, panelY, panelW, panelH).setDepth(this.uiDepth);
+    const panelY = 86, panelW = 460, panelH = 48;
+    this.scorePanel = makeGlassPanel(this, this.centerX, panelY, panelW, panelH).setDepth(this.uiDepth);
 
-  this.scoreText = makeText(this, this.centerX - panelW/2 + 12, panelY, 'Счёт: 0', 'h2')
-      .setOrigin(0,0.5).setDepth(this.uiDepth);
-  this.bestText = makeText(this, this.centerX + panelW/2 - 44, panelY, 'Рекорд: 0', 'body')
-      .setOrigin(1,0.5).setDepth(this.uiDepth);
+    this.scoreText = makeText(this, this.centerX - panelW / 2 + 12, panelY, 'Счёт: 0', 'h2')
+      .setOrigin(0, 0.5).setDepth(this.uiDepth);
+    this.bestText = makeText(this, this.centerX + panelW / 2 - 44, panelY, 'Рекорд: 0', 'body')
+      .setOrigin(1, 0.5).setDepth(this.uiDepth);
 
-  const menuBtn = this.add.rectangle(this.centerX + panelW/2 - 16, panelY, 24, 24, THEME.button.fill)
-      .setStrokeStyle(2, THEME.button.stroke).setInteractive({useHandCursor:true}).setDepth(this.uiDepth);
-  makeText(this, menuBtn.x, menuBtn.y, '≡', 'body').setOrigin(0.5).setDepth(this.uiDepth);
-  menuBtn.on('pointerdown',()=>menuBtn.fillColor=THEME.button.fillActive);
-  menuBtn.on('pointerup',()=>{ menuBtn.fillColor=THEME.button.fill; this.playSfx('click'); this.openMenu(); });
+    this.hammerBtn = this.createButton(this.centerX + panelW / 2 - 60, panelY - panelH / 2 - 22,
+      100, 34, '🛠 0', () => this.toggleHammerMode());
+    this.hammerBtn.container.setDepth(this.uiDepth);
 
-  this.statusText = makeText(this, this.centerX, panelY + panelH/2 + 14, '', 'subtle')
+    this.statusText = makeText(this, this.centerX, panelY + panelH / 2 + 14, '', 'subtle')
       .setOrigin(0.5).setDepth(this.uiDepth);
-}
+  }
 
   layoutButtonsUnderBoard() {
     const y = this.topY + BOARD_H + 48;
@@ -181,14 +183,14 @@ export default class GameScene extends Phaser.Scene {
 
     const bw = 132, bh = 44, space = 16;
 
-    this.buttons.newGame = this.createButton(-bw - space / 2, 0, bw, bh, 'Новая', () => this.newGame());
-    this.buttons.undo    = this.createButton(0, 0, bw, bh, 'Отмена (0)', () => this.useUndo());
-    this.buttons.hammer  = this.createButton(+bw + space / 2, 0, bw, bh, 'Молоток (0)', () => this.toggleHammerMode());
+    this.buttons.newGame = this.createButton(-bw - space, 0, bw, bh, '⟲ Новая', () => this.newGame());
+    this.buttons.undo    = this.createButton(0, 0, bw, bh, '↩ Отмена (0)', () => this.useUndo());
+    this.buttons.menu    = this.createButton(+bw + space, 0, bw, bh, '☰ Меню', () => this.openMenu());
 
     this.buttonsGroup.add([
       this.buttons.newGame.container,
       this.buttons.undo.container,
-      this.buttons.hammer.container
+      this.buttons.menu.container
     ]);
   }
 
@@ -233,7 +235,7 @@ export default class GameScene extends Phaser.Scene {
   updateButtons(){
     // Отмена
     if (this.buttons.undo){
-      this.buttons.undo.text.setText('Отмена (' + this.undoCount + ')');
+      this.buttons.undo.text.setText('↩ Отмена (' + this.undoCount + ')');
       if (this.undoCount <= 0){
         this.buttons.undo.rect.setTint(0x2a2f3f);
         this.buttons.undo.rect.disableInteractive();
@@ -242,15 +244,14 @@ export default class GameScene extends Phaser.Scene {
         this.buttons.undo.rect.setInteractive({ useHandCursor:true });
       }
     }
-    // Молоток
-    if (this.buttons.hammer){
-      this.buttons.hammer.text.setText('Молоток (' + this.hammerCount + ')');
+    if (this.hammerBtn){
+      this.hammerBtn.text.setText('🛠 ' + this.hammerCount);
       if (this.hammerCount <= 0){
-        this.buttons.hammer.rect.setTint(0x2a2f3f);
-        this.buttons.hammer.rect.disableInteractive();
+        this.hammerBtn.rect.setTint(0x2a2f3f);
+        this.hammerBtn.rect.disableInteractive();
       } else {
-        this.buttons.hammer.rect.clearTint();
-        this.buttons.hammer.rect.setInteractive({ useHandCursor:true });
+        this.hammerBtn.rect.clearTint();
+        this.hammerBtn.rect.setInteractive({ useHandCursor:true });
       }
     }
   }
@@ -338,7 +339,7 @@ export default class GameScene extends Phaser.Scene {
 
     const items = [
       { key: 'play1',  title: 'Сыграй 1 партию',   progress: d.played ? 1 : 0, total: 1,  reward: '+1 молоток',
-        onClaim: () => { this.hammerCount += 1; this.updateButtons(); this.playSfx('claim'); } },
+        onClaim: () => { this.hammerCount += 1; this.updateButtons(); try { saveData('hammers', this.hammerCount); } catch {}; this.playSfx('claim'); } },
       { key: 'merge10',title: 'Сделай 10 слияний', progress: Math.min(d.merges, 10), total: 10, reward: '+3 отмены',
         onClaim: () => { this.undoCount += 3; this.updateButtons(); this.playSfx('claim'); } },
       { key: 'tile128',title: 'Собери плитку 128', progress: d.maxTile >= 128 ? 1 : 0, total: 1,  reward: '+500 очков',
@@ -429,17 +430,21 @@ export default class GameScene extends Phaser.Scene {
   const btnW = Math.min(280, box.displayWidth - 160); // безопасная ширина
   const btnH = 36;
   const btnY1 = y0 + step*2 + 10;       // Сменить ник
-  const btnY2 = btnY1 + btnH + 16;      // +10 отмен за рекламу
+  const btnY2 = btnY1 + btnH + 16;      // Получить молоток
 
   const btnNick = this.createButton(box.x, btnY1, btnW, btnH, 'Сменить ник', ()=>{
     const n=(prompt('Введите новый ник (2–16):', this.nickname||'Игрок')||'').trim().slice(0,16);
     if(n.length>=2){ this.nickname=n; localStorage.setItem('yag-2048-nick',n); if (this.nickText) this.nickText.setText('👤 '+this.nickname); }
   });
 
-  const btnAds  = this.createButton(box.x, btnY2, btnW, btnH, '+10 отмен за рекламу', async ()=>{
+  const btnAds  = this.createButton(box.x, btnY2, btnW, btnH, 'Получить 🛠 (реклама)', async ()=>{
     const ok = await showRewarded();
     if (!ok) return;
-    this.undoCount+=10; this.updateButtons(); this.flashStatus('+10 отмен получено'); this.playSfx('claim');
+    this.hammerCount += 1;
+    try { saveData('hammers', this.hammerCount); } catch {}
+    this.updateButtons();
+    this.flashStatus('+1 молоток');
+    this.playSfx('claim');
   });
 
   cont.add([lblMusic, togMusic, lblSfx, togSfx, btnNick.container, btnAds.container]);
@@ -498,8 +503,8 @@ export default class GameScene extends Phaser.Scene {
     }
     const rect = this.add.image(0, 0, key).setDisplaySize(TILE, TILE);
     const highlight = this.add.graphics();
-    highlight.fillStyle(0xffffff,0.15);
-    highlight.fillRoundedRect(-TILE/2,-TILE/2,TILE,TILE,THEME.glass.radius);
+    highlight.fillStyle(0xffffff, 0.15);
+    highlight.fillRoundedRect(-TILE / 2, -TILE / 2, TILE, TILE, THEME.glass.radius);
 
     const text = makeText(this, 0, -8, '' + value, 'title')
       .setOrigin(0.5).setColor(style.text)
@@ -511,7 +516,7 @@ export default class GameScene extends Phaser.Scene {
     cont.setScale(0);
     this.tweens.add({ targets: cont, scale: 1, duration: THEME.motion.fast, ease: THEME.motion.easingOut });
 
-    const tile = { r: r, c: c, value: value, container: cont, rect: rect, text: text, el: el, destroyed: false };
+    const tile = { r: r, c: c, value: value, container: cont, rect: rect, text: text, el: el, highlight: highlight, destroyed: false };
     this.tiles.add(tile);
 
     cont.on('pointerup', () => {
@@ -601,6 +606,7 @@ export default class GameScene extends Phaser.Scene {
     if (moved) {
       this.playSfx('move');
       this.spawnRandomTile();
+      this.afterMove();
       if (this.isGameOver()) {
         await this.onGameOver();
         this.isMoving = false;
@@ -758,6 +764,8 @@ export default class GameScene extends Phaser.Scene {
     this.hammerCount--;
     this.hammerMode = false;
     this.updateButtons();
+    try { saveData('hammers', this.hammerCount); } catch {}
+    this.tiles.forEach(t=>t.highlight.setFillStyle(0xffffff,0.15));
     this.flashStatus('Плитка удалена');
     this.playSfx('hammer');
   }
@@ -767,8 +775,102 @@ export default class GameScene extends Phaser.Scene {
       this.flashStatus('Нет молотков'); this.playSfx('error'); return;
     }
     this.hammerMode = !this.hammerMode;
+    this.tiles.forEach(t=>{
+      t.highlight.setFillStyle(this.hammerMode ? THEME.glow.color : 0xffffff,
+        this.hammerMode ? THEME.glow.alpha * 0.5 : 0.15);
+    });
     this.flashStatus(this.hammerMode ? 'Молоток активен: тап по плитке' : 'Молоток выключен');
     this.playSfx('toggle');
+  }
+
+  afterMove() {
+    this.moveCount++;
+    if (BONUS_CONFIG.rerollEvery && this.moveCount % BONUS_CONFIG.rerollEvery === 0) {
+      this.rerollRandomTile();
+    }
+    if (BONUS_CONFIG.hintEvery && this.moveCount % BONUS_CONFIG.hintEvery === 0) {
+      this.showHint();
+    }
+  }
+
+  rerollRandomTile() {
+    const arr = Array.from(this.tiles);
+    if (!arr.length) return;
+    const tile = Phaser.Utils.Array.GetRandom(arr);
+    const vals = [2, 4, 8];
+    tile.value = Phaser.Utils.Array.GetRandom(vals);
+    const style = tileStyleFor(tile.value);
+    const key = `tile-${tile.value}-${TILE}`;
+    if (!this.textures.exists(key)) {
+      const g = this.add.graphics();
+      g.fillGradientStyle(style.from, style.from, style.to, style.to, 1);
+      g.fillRoundedRect(-TILE / 2, -TILE / 2, TILE, TILE, THEME.glass.radius);
+      g.generateTexture(key, TILE, TILE);
+      g.destroy();
+    }
+    tile.rect.setTexture(key).setDisplaySize(TILE, TILE);
+    tile.text.setText('' + tile.value);
+    tile.text.setFontSize(tile.value >= 1024 ? 32 : tile.value >= 128 ? 38 : 44).setColor(style.text);
+    tile.el.setText(style.chip).setColor(style.text);
+    this.flashStatus('Реролл плитки');
+  }
+
+  showHint() {
+    const dir = this.findBestMove();
+    if (!dir) return;
+    const map = { left: '←', right: '→', up: '↑', down: '↓' };
+    this.flashStatus('Лучший ход: ' + map[dir]);
+  }
+
+  findBestMove() {
+    const dirs = ['up', 'left', 'right', 'down'];
+    let best = null, bestScore = -1;
+    for (const d of dirs) {
+      const s = this.estimateMove(d);
+      if (s.moved) {
+        const score = s.merges * 10 + s.empty;
+        if (score > bestScore) { bestScore = score; best = d; }
+      }
+    }
+    return best;
+  }
+
+  estimateMove(dir) {
+    const temp = this.grid.map(row => row.map(t => (t ? t.value : 0)));
+    let moved = false, merges = 0;
+    const line = (li) => {
+      if (dir === 'left' || dir === 'right') {
+        const arr = [];
+        for (let c = 0; c < GRID; c++) arr.push({ r: li, c });
+        return dir === 'left' ? arr : arr.reverse();
+      } else {
+        const arr = [];
+        for (let r = 0; r < GRID; r++) arr.push({ r, c: li });
+        return dir === 'up' ? arr : arr.reverse();
+      }
+    };
+    for (let li = 0; li < GRID; li++) {
+      const idx = line(li);
+      const arr = idx.map(p => temp[p.r][p.c]).filter(v => v > 0);
+      const out = new Array(GRID).fill(0);
+      let dst = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const v = arr[i];
+        if (i < arr.length - 1 && arr[i + 1] === v) {
+          out[dst] = v * 2; merges++; i++;
+        } else {
+          out[dst] = v;
+        }
+        if (out[dst] !== temp[idx[dst].r][idx[dst].c]) moved = true;
+        dst++;
+      }
+      for (let j = 0; j < GRID; j++) {
+        const p = idx[j];
+        temp[p.r][p.c] = out[j];
+      }
+    }
+    const empty = temp.flat().filter(v => v === 0).length;
+    return { moved, merges, empty };
   }
 
   async onGameOver() {
@@ -985,7 +1087,11 @@ export default class GameScene extends Phaser.Scene {
     osc.connect(gain); gain.connect(this.ac.destination);
     osc.start(); osc.stop(now + 0.5);
   }
-  saveSettings() { localStorage.setItem('yag-2048-settings', JSON.stringify({ musicOn: this.musicOn, sfxOn: this.sfxOn })); }
+  saveSettings() {
+    const st = { musicOn: this.musicOn, sfxOn: this.sfxOn };
+    localStorage.setItem('yag-2048-settings', JSON.stringify(st));
+    try { saveData('settings', st); } catch {}
+  }
 
   /* -------------------- FX -------------------- */
   createSparkTexture() {
@@ -1010,16 +1116,25 @@ export default class GameScene extends Phaser.Scene {
     try {
       const saved = await loadData('bestScore');
       if (typeof saved === 'number') this.bestScore = Math.max(this.bestScore, saved | 0);
+      const h = await loadData('hammers');
+      if (typeof h === 'number') this.hammerCount = h | 0;
+      const stgCloud = await loadData('settings');
+      if (stgCloud && typeof stgCloud.musicOn === 'boolean') this.musicOn = stgCloud.musicOn;
+      if (stgCloud && typeof stgCloud.sfxOn === 'boolean') this.sfxOn = stgCloud.sfxOn;
       const local = JSON.parse(localStorage.getItem('yag-2048-save-v1') || '{}');
       if (local && typeof local.bestScore === 'number') this.bestScore = Math.max(this.bestScore, local.bestScore | 0);
+      if (local && typeof local.hammers === 'number') this.hammerCount = local.hammers | 0;
       const stg = JSON.parse(localStorage.getItem('yag-2048-settings') || '{}');
       if (typeof stg.musicOn === 'boolean') this.musicOn = stg.musicOn;
       if (typeof stg.sfxOn === 'boolean') this.sfxOn = stg.sfxOn;
     } catch (e) {}
   }
   async saveProgress() {
-    try { await saveData('bestScore', this.bestScore); } catch (e) {}
-    localStorage.setItem('yag-2048-save-v1', JSON.stringify({ bestScore: this.bestScore }));
+    try {
+      await saveData('bestScore', this.bestScore);
+      await saveData('hammers', this.hammerCount);
+    } catch (e) {}
+    localStorage.setItem('yag-2048-save-v1', JSON.stringify({ bestScore: this.bestScore, hammers: this.hammerCount }));
   }
 
   updateUI() {

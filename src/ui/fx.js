@@ -52,17 +52,21 @@ export function makeText(scene,x,y,txt,key='body'){
   return t;
 }
 
-export function addTitleWithShine(scene, x, y, text){
-  const title = makeText(scene,x,y,text,'title').setOrigin(0.5);
-  const shiny = makeText(scene,x,y,text,'title').setOrigin(0.5).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
-  const barH = Math.ceil(title.height+8), barW=64;
-  const maskG = scene.add.graphics().fillStyle(0xffffff,1);
-  maskG.fillRect(0,0,barW,barH);
+export function addTitleWithShine(scene, x, y, text, { shiny = true } = {}) {
+  const title = makeText(scene, x, y, text, 'title').setOrigin(0.5);
+  if (!shiny) return scene.add.container(0, 0, [title]);
+  const shine = makeText(scene, x, y, text, 'title')
+    .setOrigin(0.5)
+    .setBlendMode(Phaser.BlendModes.ADD)
+    .setAlpha(0);
+  const barH = Math.ceil(title.height + 8), barW = 64;
+  const maskG = scene.add.graphics().fillStyle(0xffffff, 1);
+  maskG.fillRect(0, 0, barW, barH);
   const geomMask = maskG.createGeometryMask();
-  shiny.setMask(geomMask);
-  const startX = x - title.displayWidth/2 - 60;
-  const endX = x + title.displayWidth/2 + 60;
-  maskG.x = startX; maskG.y = y - barH/2;
+  shine.setMask(geomMask);
+  const startX = x - title.displayWidth / 2 - 60;
+  const endX = x + title.displayWidth / 2 + 60;
+  maskG.x = startX; maskG.y = y - barH / 2;
   scene.tweens.add({
     targets: maskG,
     x: endX,
@@ -71,9 +75,9 @@ export function addTitleWithShine(scene, x, y, text){
     repeat: -1,
     yoyo: false,
     repeatDelay: 1200,
-    onRepeat: ()=>{maskG.x=startX;},
-    onStart: ()=>shiny.setAlpha(0.9),
-    onUpdate: ()=>shiny.setAlpha(0.9)
+    onRepeat: () => { maskG.x = startX; },
+    onStart: () => shine.setAlpha(0.9),
+    onUpdate: () => shine.setAlpha(0.9)
   });
-  return scene.add.container(0,0,[title,shiny]);
+  return scene.add.container(0, 0, [title, shine]);
 }

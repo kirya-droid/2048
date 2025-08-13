@@ -1,47 +1,35 @@
 export const THEME = {
-  // фон сцены: мягкий градиент
-  bgGradient: { from: 0x0f1724, to: 0x1a2740, angle: 22 },
-  // стеклянные панели
-  glass: { fill: 0x162132, alpha: 0.55, stroke: 0x3a4c6a, strokeAlpha: 0.8, radius: 16 },
-  // тени/свечения
-  shadow: { color: 0x0a0f18, alpha: 0.45, blur: 12, offsetY: 6 },
-  glow: { color: 0x77c0ff, alpha: 0.85 },
-  // типографика
+  bgGradient: { from: 0x0b1220, to: 0x131b2b, angle: 18 },
+
+  glass: { fill: 0x101827, alpha: 0.55, stroke: 0x253247, strokeAlpha: 0.85, radius: 16 },
+
+  shadow: { color: 0x000000, alpha: 0.35, blur: 12, offsetY: 6 },
+  glow:   { color: 0x7fd2ff, alpha: 0.8 },
+
   fontFamily: 'Inter, SF Pro, Segoe UI, Roboto, Arial, sans-serif',
-  title:   { size: 36, weight: '800', color: '#f5f8ff' },
-  h2:      { size: 22, weight: '700', color: '#e8f0ff' },
-  body:    { size: 16, weight: '600', color: '#cfe0ff' },
-  subtle:  { size: 14, weight: '500', color: '#9bb4ff' },
-  // цвета плиток 2048 (градиенты)
+  title:  { size: 34, weight: '800', color: '#F5F7FF' },
+  h2:     { size: 20, weight: '700', color: '#E6EEFF' },
+  body:   { size: 16, weight: '600', color: '#C7D8FF' },
+  subtle: { size: 13, weight: '500', color: '#9BB4FF' },
+
   tile: {
-    2:   { from: 0x234a74, to: 0x2f5d8f, text: '#ffffff', chip: '💧' },
-    4:   { from: 0x1f6a7b, to: 0x2c8a92, text: '#ffffff', chip: '💧' },
-    8:   { from: 0x1f7b6b, to: 0x2ea684, text: '#ffffff', chip: '🌱' },
-    16:  { from: 0x2a8f6a, to: 0x48b57f, text: '#ffffff', chip: '🌱' },
-    32:  { from: 0x39a35e, to: 0x66c769, text: '#0b1a10', chip: '🔥' },
-    64:  { from: 0x6aba46, to: 0xa3dd58, text: '#0b1a10', chip: '🔥' },
-    128: { from: 0xb3c73c, to: 0xe4e66a, text: '#0b1a10', chip: '🌪' },
-    256: { from: 0xe0b73d, to: 0xf0c85f, text: '#0b1a10', chip: '⚡' },
-    512: { from: 0xe08a3d, to: 0xf3a864, text: '#0b1a10', chip: '⚡' },
-    1024:{ from: 0xde5e4f, to: 0xf3857e, text: '#ffffff', chip: '💎' },
-    2048:{ from: 0xcc4566, to: 0xf471a4, text: '#ffffff', chip: '💎' },
-    4096:{ from: 0x8e44ad, to: 0xb77ed6, text: '#ffffff', chip: '🌈' },
-    8192:{ from: 0x34495e, to: 0x5a6e89, text: '#ffffff', chip: '🪐' },
-    default: { from: 0x243249, to: 0x2e3e58, text: '#ffffff', chip: '✨' }
+    2:{from:0x1a2538,to:0x24324a,text:'#EAF2FF',chip:'💧'},
+    4:{from:0x1b2c3f,to:0x2d3c55,text:'#EAF2FF',chip:'💧'},
+    8:{from:0x1c4c48,to:0x2f6a62,text:'#F0FBFF',chip:'🌱'},
+    16:{from:0x1e6a5b,to:0x328a74,text:'#F0FBFF',chip:'🌱'},
+    32:{from:0x2b7f58,to:0x49a06d,text:'#0b1a10',chip:'🔥'},
+    64:{from:0x52b047,to:0x8ad65a,text:'#0b1a10',chip:'🔥'},
+    128:{from:0xaac73b,to:0xdde66a,text:'#0b1a10',chip:'🌪'},
+    256:{from:0xd3b23d,to:0xe8c961,text:'#0b1a10',chip:'⚡'},
+    512:{from:0xd07d3e,to:0xeea363,text:'#0b1a10',chip:'⚡'},
+    1024:{from:0xc45a63,to:0xe07e94,text:'#ffffff',chip:'💎'},
+    2048:{from:0x9c4b88,to:0xc86fad,text:'#ffffff',chip:'💎'},
+    4096:{from:0x6b57b2,to:0x8a7ad2,text:'#ffffff',chip:'🌈'},
+    8192:{from:0x304058,to:0x516685,text:'#ffffff',chip:'🪐'},
+    default:{from:0x1d2a3f,to:0x2a3a54,text:'#ffffff',chip:'✨'},
   },
-  // анимации
-  motion: {
-    fast: 160,
-    move: 100,
-    merge: 140,
-    micro: 90,
-    easingInOut: 'Sine.easeInOut',
-    easingOut: 'Cubic.easeOut',
-  },
-  // кнопки
-  button: {
-    h: 44, radius: 12,
-    fill: 0x223249, fillActive: 0x2b3b55, stroke: 0x3a4c6a,
-    text: '#eaf2ff'
-  }
+
+  motion: { fast:160, move:100, merge:140, micro:90, easingInOut:'Sine.easeInOut', easingOut:'Cubic.easeOut' },
+
+  button: { h:44, radius:12, fill:0x1a2a40, fillActive:0x24354f, stroke:0x3a4c6a, text:'#EAF2FF' }
 };
