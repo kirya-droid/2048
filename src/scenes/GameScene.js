@@ -122,9 +122,12 @@ export default class GameScene extends Phaser.Scene {
     const bg = drawGradientRect(this, W / 2, H / 2, W, H, THEME.bgGradient);
     bg.setDepth(-1000);
 
+    this.hud = this.add.container(0,0).setDepth(this.uiDepth).setScrollFactor(0);
+    this.boardContainer = this.add.container(0,0).setDepth(this.boardDepth);
+    this.bottomUI = this.add.container(0,0).setDepth(this.uiDepth).setScrollFactor(0);
+
     this.createSparkTexture();
     this.buildHUD();
-    this.boardContainer = this.add.container(0, 0).setDepth(this.boardDepth);
     this.drawBoard();
     this.initGrid();
     for (let i = 0; i < START_TILES; i++) this.spawnRandomTile();
@@ -133,9 +136,19 @@ export default class GameScene extends Phaser.Scene {
     await this.ensureNickname();
     this.updateUI();
 
-    this.layoutHUD();
-    this.layoutButtonsUnderBoard();
-    this.scale.on('resize', () => { this.layoutHUD(); this.layoutButtonsUnderBoard(); });
+    await (document.fonts?.ready ?? Promise.resolve());
+    this.time.delayedCall(0, this.layoutHUD, [], this);
+    this.scale.on('resize', () => this.time.delayedCall(0, this.layoutHUD, [], this), this);
+    this.time.addEvent({
+      delay: 300,
+      loop: true,
+      callback: () => {
+        const vw = this.scale.gameSize.width, vh = this.scale.gameSize.height;
+        const b = this.titleText.getBounds();
+        if (b.right < 32 || b.bottom < 32 || b.left > vw - 32 || b.top > vh - 32) this.layoutHUD();
+      }
+    });
+
     this.initInput();
     this.initAudio(); if (this.musicOn) this.deferStartMusic();
 
@@ -153,7 +166,8 @@ export default class GameScene extends Phaser.Scene {
     this.events.once('shutdown', () => {
       try{ this.hud.destroy(true); }catch{}
       try{ this.boardContainer.destroy(true); }catch{}
-      this.tiles.forEach(t=>{ try{ t.container.destroy(); }catch{} });
+      try{ this.bottomUI.destroy(true); }catch{}
+      this.tiles.forEach(t=>{ try{ t.container.destroy(true); }catch{} });
     });
   }
 
@@ -171,7 +185,8 @@ export default class GameScene extends Phaser.Scene {
     this.nickname = nick;
     if (!this.nickText) {
       this.nickText = makeText(this, this.centerX, 14, '👤 ' + this.nickname, 'subtle')
-        .setOrigin(0.5).setDepth(this.uiDepth);
+        .setOrigin(0.5);
+      this.hud.add(this.nickText);
     } else {
       this.nickText.setText('👤 ' + this.nickname);
     }
@@ -179,21 +194,15 @@ export default class GameScene extends Phaser.Scene {
 
   /* -------------------- UI -------------------- */
   buildHUD(){
-    this.hud = this.add.container(0,0).setDepth(this.uiDepth);
-    this.hud.setScrollFactor(0);
-
     this.title = addTitleWithShine(this, 0, 0, '2048: Elements', { shiny: false });
+    this.titleText = this.title.list ? this.title.list[0] : this.title;
     this.hud.add(this.title);
 
-    this.nickText = makeText(this, 0, 0, '👤 ' + (this.nickname || ''), 'subtle')
-      .setOrigin(0.5);
-    this.hud.add(this.nickText);
-
-    this.scorePanel = makeGlassPanel(this,0,0,460,48);
-    this.hud.add(this.scorePanel);
-    this.scoreText = makeText(this,0,0,'Счёт: 0','h2').setOrigin(0,0.5);
-    this.bestText = makeText(this,0,0,'Рекорд: 0','body').setOrigin(1,0.5);
-    this.hud.add([this.scoreText,this.bestText]);
+    this.scoreBarBg = makeGlassPanel(this,0,0,460,48);
+    this.hud.add(this.scoreBarBg);
+    this.scoreLeftText = makeText(this,0,0,'Счёт: 0','h2').setOrigin(0,0.5);
+    this.scoreRightText = makeText(this,0,0,'Рекорд: 0','body').setOrigin(1,0.5);
+    this.hud.add([this.scoreLeftText,this.scoreRightText]);
 
     this.statusText = makeText(this,0,0,'','subtle').setOrigin(0.5);
     this.hud.add(this.statusText);
@@ -216,64 +225,75 @@ export default class GameScene extends Phaser.Scene {
   }
 
   makeBonusButton({icon,label,key}){
-    const cont = this.add.container(0,0);
+    const cont = this.add.container(0,0).setSize(180,38).setInteractive({useHandCursor:true});
     const bg = this.add.rectangle(0,0,180,38,THEME.button.fill)
-      .setStrokeStyle(2,THEME.button.stroke)
-      .setInteractive({useHandCursor:true});
+      .setStrokeStyle(2,THEME.button.stroke);
     const iconT = makeText(this,0,0,icon,'body').setOrigin(0.5,0.5);
     const labelT = makeText(this,0,0,label,'body').setOrigin(0,0.5);
     const countBg = this.add.graphics();
     countBg.fillStyle(THEME.button.fillActive,1);
     countBg.lineStyle(1,THEME.button.stroke,1);
-    countBg.fillRoundedRect(-14,-10,28,20,10);
+    countBg.fillRoundedRect(-14,-11,28,22,11);
     const countT = makeText(this,0,0,'0','subtle').setOrigin(0.5).setColor('#fff');
     cont.add([bg,iconT,labelT,countBg,countT]);
-    cont.setSize(180,38);
-    bg.on('pointerover',()=>{
+    cont.on('pointerover',()=>{
       this.tweens.add({targets:cont,scale:1.03,duration:THEME.motion.micro});
       bg.setFillStyle(THEME.button.fillActive);
     });
-    bg.on('pointerout',()=>{
+    cont.on('pointerout',()=>{
       this.tweens.add({targets:cont,scale:1,duration:THEME.motion.micro});
       bg.setFillStyle(THEME.button.fill);
     });
-    bg.on('pointerup',()=>{ this.playSfx('click'); this.activateBonus(key); });
-    return {container:cont,bg:bg,icon:iconT,label:labelT,countBg:countBg,countText:countT};
+    cont.on('pointerup',()=>{ this.playSfx('click'); this.activateBonus(key); });
+    return {container:cont,rect:bg,bg:bg,icon:iconT,label:labelT,countBg:countBg,countText:countT};
   }
 
   layoutHUD(){
+    const vw = Math.floor(this.scale.gameSize.width);
+    const vh = Math.floor(this.scale.gameSize.height);
     const pad = 12;
-    const vw = this.scale.width, vh = this.scale.height;
-    this.centerX = vw/2;
     const compact = vw < 520;
+    this.centerX = vw/2;
+
+    this.cameras.main.setZoom(1);
+    this.cameras.main.setScroll(0,0);
+    this.cameras.main.setViewport(0,0,vw,vh);
+    this.hud.setPosition(0,0);
+    this.boardContainer.setPosition(0,0);
+    this.bottomUI.setPosition(0,0);
+
+    this.titleText.setFontSize(compact ? 26 : 34);
+    this.titleText.setOrigin(0.5,0.5);
+    this.titleText.setPosition(Math.round(vw/2), pad + Math.round(this.titleText.displayHeight/2));
+
     const bonusW = compact ? 44 : 180;
-    const btnH = compact ? 44 : 38;
-    const gap = compact ? 10 : 8;
-    const items = compact ? 3 : 4;
-    const bonusH = btnH * items + gap * (items - 1);
-
-    const titleText = this.title.list ? this.title.list[0] : this.title;
-    titleText.setFontSize(compact ? 26 : 34);
-    this.title.setPosition(Math.round(vw/2), Math.round(pad + titleText.displayHeight/2));
-
+    const btnH   = compact ? 44 : 38;
+    const gap    = compact ? 10 : 8;
+    const bonusH = btnH*3 + gap*2;
     this.bonusPanel.setSize(bonusW, bonusH);
-    this.bonusPanel.setPosition(Math.round(vw - pad - bonusW/2), Math.round(pad + btnH/2));
+    this.bonusPanel.setPosition(vw - pad - Math.round(bonusW/2), pad + Math.round(btnH/2));
+    this.bonusPanel.setScale(1);
 
     const sbH = compact ? 46 : 54;
     const sbW = Math.min(880, vw - pad*2);
-    const bottomTitle = this.title.y + titleText.displayHeight/2;
-    const bpBounds = this.bonusPanel.getBounds();
-    const topSafeBottom = Math.max(bottomTitle, bpBounds.bottom);
-    this.scorePanel.setPosition(Math.round(vw/2), Math.round(topSafeBottom + pad + sbH/2));
-    this.scorePanel.setScale(sbW/460, sbH/48);
-    this.scoreText.setPosition(Math.round(this.scorePanel.x - sbW/2 + 16), Math.round(this.scorePanel.y));
-    this.bestText.setPosition(Math.round(this.scorePanel.x + sbW/2 - 16), Math.round(this.scorePanel.y));
+    const topSafeBottom = this.titleText.y + this.titleText.displayHeight/2;
+    this.scoreBarBg.setPosition(Math.round(vw/2), Math.round(topSafeBottom + pad + sbH/2));
+    this.scoreBarBg.setScale(sbW/460, sbH/48);
+    this.scoreLeftText.setPosition(Math.round(this.scoreBarBg.x - sbW/2 + 20), this.scoreBarBg.y);
+    this.scoreRightText.setPosition(Math.round(this.scoreBarBg.x + sbW/2 - 20), this.scoreBarBg.y);
 
-    const boardTop = this.scorePanel.getBounds().bottom + pad;
-    this.boardContainer.setPosition(Math.round((vw - BOARD_W)/2), Math.round(boardTop));
-    this.topY = boardTop;
+    const boardTop = this.scoreBarBg.y + sbH/2 + pad;
+    const bottomReserve = 80;
+    const boardSize = Math.min(vw - pad*2, vh - boardTop - bottomReserve);
+    const boardX = Math.round((vw - boardSize)/2);
+    const boardY = Math.round(boardTop);
+    this.boardContainer.setPosition(boardX, boardY);
+    this.setBoardViewport(boardSize);
 
-    // layout bonus buttons
+    const by = Math.round(boardY + boardSize + pad);
+    this.bottomUI.setPosition(0, by);
+    this.layoutButtonsUnderBoard(vw);
+
     const keys = ['hammer','freeze','double','swap'];
     let idx = 0;
     keys.forEach(k => {
@@ -284,7 +304,7 @@ export default class GameScene extends Phaser.Scene {
       if(show){
         const w = bonusW, h = btnH;
         btn.container.setPosition(0, Math.round(idx*(btnH+gap)));
-        btn.bg.setDisplaySize(w,h);
+        btn.bg.width = w; btn.bg.height = h; btn.bg.setSize(w,h);
         btn.container.setSize(w,h);
         if(compact){
           btn.icon.setPosition(0, h/2);
@@ -302,6 +322,9 @@ export default class GameScene extends Phaser.Scene {
         idx++;
       }
     });
+
+    if (this.nickText) this.nickText.setPosition(Math.round(vw/2), 14);
+    if (this.statusText) this.statusText.setPosition(Math.round(vw/2), this.scoreBarBg.y + sbH/2 + 20);
   }
 
   updateBonusUI(){
@@ -356,21 +379,28 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  layoutButtonsUnderBoard() {
-    const y = this.boardContainer.y + BOARD_H + 48;
-    this.buttonsGroup = this.add.container(this.centerX, y).setDepth(this.uiDepth);
-
+  layoutButtonsUnderBoard(vw) {
     const bw = 132, bh = 44, space = 16;
+    if (!this.buttonsGroup) {
+      this.buttonsGroup = this.add.container(0, 0).setDepth(this.uiDepth);
+      this.bottomUI.add(this.buttonsGroup);
 
-    this.buttons.newGame = this.createButton(-bw - space, 0, bw, bh, '⟲ Новая', () => this.newGame());
-    this.buttons.undo    = this.createButton(0, 0, bw, bh, '↩ Отмена (0)', () => this.useUndo());
-    this.buttons.menu    = this.createButton(+bw + space, 0, bw, bh, '☰ Меню', () => this.openMenu());
+      this.buttons.newGame = this.createButton(-bw - space, 0, bw, bh, '⟲ Новая', () => this.newGame());
+      this.buttons.undo    = this.createButton(0, 0, bw, bh, '↩ Отмена (0)', () => this.useUndo());
+      this.buttons.menu    = this.createButton(bw + space, 0, bw, bh, '☰ Меню', () => this.openMenu());
 
-    this.buttonsGroup.add([
-      this.buttons.newGame.container,
-      this.buttons.undo.container,
-      this.buttons.menu.container
-    ]);
+      this.buttonsGroup.add([
+        this.buttons.newGame.container,
+        this.buttons.undo.container,
+        this.buttons.menu.container
+      ]);
+    }
+    this.buttonsGroup.setPosition(Math.round(vw/2), 0);
+  }
+
+  setBoardViewport(size){
+    const scale = size / BOARD_W;
+    this.boardContainer.setScale(scale);
   }
 
   createButton(x, y, w, h, label, onClick) {
@@ -602,7 +632,7 @@ export default class GameScene extends Phaser.Scene {
     this.grid = [];
     for (let r = 0; r < GRID; r++) this.grid[r] = new Array(GRID).fill(null);
 
-    this.tiles.forEach(t => t.container.destroy());
+    this.tiles.forEach(t => t.container.destroy(true));
     this.tiles.clear();
 
     this.score = 0;
@@ -809,7 +839,7 @@ export default class GameScene extends Phaser.Scene {
               any = true;
             }
             tweens.push(this.tweenMoveTo(kill.container, pKeep.x, pKeep.y, () => {
-              kill.destroyed = true; kill.container.destroy(); this.tiles.delete(kill);
+              kill.destroyed = true; kill.container.destroy(true); this.tiles.delete(kill);
             }));
             any = true;
             if (keep.value >= 2048) { const pos = this.xyToPixel(tp.r, tp.c); this.emitFireworks(pos.x, pos.y); }
@@ -883,7 +913,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   restoreSnapshot(s){
-    this.tiles.forEach(t=>t.container.destroy());
+    this.tiles.forEach(t=>t.container.destroy(true));
     this.tiles.clear();
 
     let i=0;
@@ -902,7 +932,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.hammerCount <= 0) return;
     const r = tile.r, c = tile.c;
     tile.destroyed = true;
-    this.tweens.add({ targets: tile.container, scale: 0, duration: 120, onComplete: () => tile.container.destroy() });
+    this.tweens.add({ targets: tile.container, scale: 0, duration: 120, onComplete: () => tile.container.destroy(true) });
     this.tiles.delete(tile);
     this.grid[r][c] = null;
     this.hammerCount--;
@@ -1103,7 +1133,7 @@ export default class GameScene extends Phaser.Scene {
       .setOrigin(0.5).setDepth(this.overlayDepth + 1);
 
     const b = this.createButton(this.centerX, overlay.y + 48, 200, 44, 'Сыграть ещё раз', () => {
-      overlay.destroy(); box.destroy(); t.destroy(); s.destroy(); b.container.destroy();
+      overlay.destroy(); box.destroy(); t.destroy(); s.destroy(); b.container.destroy(true);
       this.resetState(); this.scene.restart();
     });
     b.container.setDepth(this.overlayDepth + 1);
@@ -1166,9 +1196,9 @@ export default class GameScene extends Phaser.Scene {
       from: 0, to: 1, duration: 180,
       onUpdate: (tw) => {
         const s = 1 + 0.06 * Math.sin(tw.progress * Math.PI);
-        this.scoreText.setScale(s);
+        this.scoreLeftText.setScale(s);
       },
-      onComplete: () => this.scoreText.setScale(1)
+      onComplete: () => this.scoreLeftText.setScale(1)
     });
   }
 
@@ -1357,15 +1387,15 @@ export default class GameScene extends Phaser.Scene {
   }
 
   updateUI() {
-    if (this.scoreText) {
-      this.scoreText.setText('Счёт: ' + this.score);
+    if (this.scoreLeftText) {
+      this.scoreLeftText.setText('Счёт: ' + this.score);
       if (this.lastScore !== this.score) {
-        this.tweens.add({ targets: this.scoreText, scale: 1.06, yoyo: true, duration: THEME.motion.micro });
-        if (this.scorePanel) this.tweens.add({ targets: this.scorePanel, alpha: 0.8, yoyo: true, duration: 300 });
+        this.tweens.add({ targets: this.scoreLeftText, scale: 1.06, yoyo: true, duration: THEME.motion.micro });
+        if (this.scoreBarBg) this.tweens.add({ targets: this.scoreBarBg, alpha: 0.8, yoyo: true, duration: 300 });
         this.lastScore = this.score;
       }
     }
-    if (this.bestText)  this.bestText.setText('Рекорд: ' + this.bestScore);
+    if (this.scoreRightText)  this.scoreRightText.setText('Рекорд: ' + this.bestScore);
     this.updateButtons();
     this.updateBonusUI();
   }

@@ -11,3 +11,4 @@
 - strict safe-area layout with board offset
 - swap bonus and daily quest with menu integration
 - settings tab with bonus help text
+- deterministic HUD layout with camera reset, board scaling, and watchdog; removed stray mini texts
