@@ -11,6 +11,7 @@ import {
 } from '../sdk/yandex.js';
 import { THEME } from '../ui/theme.js';
 import { drawGradientRect, makeGlassPanel, makeText, addTitleWithShine } from '../ui/fx.js';
+import { GAME_W, GAME_H } from '../config.js';
 
 const GRID = 4, TILE = 104, GAP = 10;
 const BOARD_W = GRID * TILE + (GRID + 1) * GAP;
@@ -101,6 +102,8 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.removeAllListeners();
     this.input.removeAllListeners();
 
+    this.cameras.main.setBackgroundColor('#0b1220');
+
     setAdHooks({
       onOpen: () => {
         this.physics?.world?.pause?.();
@@ -116,10 +119,9 @@ export default class GameScene extends Phaser.Scene {
 
     await showInterstitial({ force: true }).catch(()=>{});
 
-    const W = this.scale.width, H = this.scale.height;
-    this.centerX = W / 2;
+    this.centerX = GAME_W / 2;
 
-    const bg = drawGradientRect(this, W / 2, H / 2, W, H, THEME.bgGradient);
+    const bg = drawGradientRect(this, GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, THEME.bgGradient);
     bg.setDepth(-1000);
 
     this.hud = this.add.container(0,0).setDepth(this.uiDepth).setScrollFactor(0);
@@ -137,15 +139,17 @@ export default class GameScene extends Phaser.Scene {
     this.updateUI();
 
     await (document.fonts?.ready ?? Promise.resolve());
-    this.time.delayedCall(0, this.layoutHUD, [], this);
-    this.scale.on('resize', () => this.time.delayedCall(0, this.layoutHUD, [], this), this);
+    this.layoutVirtual();
+    this.scale.on('resize', this.onResize, this);
+    this.onResize({ width: this.scale.width, height: this.scale.height });
     this.time.addEvent({
       delay: 300,
       loop: true,
       callback: () => {
         const vw = this.scale.gameSize.width, vh = this.scale.gameSize.height;
         const b = this.titleText.getBounds();
-        if (b.right < 32 || b.bottom < 32 || b.left > vw - 32 || b.top > vh - 32) this.layoutHUD();
+        if (b.right < 8 || b.left > vw - 8 || b.bottom < 8 || b.top > vh - 8)
+          this.onResize({ width: vw, height: vh });
       }
     });
 
@@ -248,42 +252,36 @@ export default class GameScene extends Phaser.Scene {
     return {container:cont,rect:bg,bg:bg,icon:iconT,label:labelT,countBg:countBg,countText:countT};
   }
 
-  layoutHUD(){
-    const vw = Math.floor(this.scale.gameSize.width);
-    const vh = Math.floor(this.scale.gameSize.height);
+  layoutVirtual(){
     const pad = 12;
+    const vw = GAME_W;
+    const vh = GAME_H;
     const compact = vw < 520;
-    this.centerX = vw/2;
 
-    this.cameras.main.setZoom(1);
-    this.cameras.main.setScroll(0,0);
-    this.cameras.main.setViewport(0,0,vw,vh);
     this.hud.setPosition(0,0);
     this.boardContainer.setPosition(0,0);
     this.bottomUI.setPosition(0,0);
 
     this.titleText.setFontSize(compact ? 26 : 34);
     this.titleText.setOrigin(0.5,0.5);
-    this.titleText.setPosition(Math.round(vw/2), pad + Math.round(this.titleText.displayHeight/2));
+    this.titleText.setPosition(Math.round(vw/2), 40);
 
     const bonusW = compact ? 44 : 180;
     const btnH   = compact ? 44 : 38;
     const gap    = compact ? 10 : 8;
-    const bonusH = btnH*3 + gap*2;
-    this.bonusPanel.setSize(bonusW, bonusH);
-    this.bonusPanel.setPosition(vw - pad - Math.round(bonusW/2), pad + Math.round(btnH/2));
-    this.bonusPanel.setScale(1);
+    this.bonusPanel.setSize(bonusW, btnH*3 + gap*2);
+    this.bonusPanel.setPosition(vw - pad - Math.round(bonusW/2), 40 + Math.round(btnH/2));
 
     const sbH = compact ? 46 : 54;
     const sbW = Math.min(880, vw - pad*2);
-    const topSafeBottom = this.titleText.y + this.titleText.displayHeight/2;
-    this.scoreBarBg.setPosition(Math.round(vw/2), Math.round(topSafeBottom + pad + sbH/2));
+    const sbY = 40 + 34 + (compact ? 6 : 10) + sbH/2;
+    this.scoreBarBg.setPosition(Math.round(vw/2), Math.round(sbY));
     this.scoreBarBg.setScale(sbW/460, sbH/48);
     this.scoreLeftText.setPosition(Math.round(this.scoreBarBg.x - sbW/2 + 20), this.scoreBarBg.y);
     this.scoreRightText.setPosition(Math.round(this.scoreBarBg.x + sbW/2 - 20), this.scoreBarBg.y);
 
     const boardTop = this.scoreBarBg.y + sbH/2 + pad;
-    const bottomReserve = 80;
+    const bottomReserve = 86;
     const boardSize = Math.min(vw - pad*2, vh - boardTop - bottomReserve);
     const boardX = Math.round((vw - boardSize)/2);
     const boardY = Math.round(boardTop);
@@ -325,6 +323,16 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.nickText) this.nickText.setPosition(Math.round(vw/2), 14);
     if (this.statusText) this.statusText.setPosition(Math.round(vw/2), this.scoreBarBg.y + sbH/2 + 20);
+  }
+
+  onResize({ width, height }) {
+    const vw = Math.floor(width);
+    const vh = Math.floor(height);
+    this.cameras.main.setViewport(0,0,vw,vh);
+    this.cameras.main.setScroll(0,0);
+    const z = Math.min(vw / GAME_W, vh / GAME_H);
+    this.cameras.main.setZoom(z);
+    this.cameras.main.centerOn(GAME_W/2, GAME_H/2);
   }
 
   updateBonusUI(){
@@ -466,8 +474,8 @@ export default class GameScene extends Phaser.Scene {
     this.menuLayer = this.add.container(0, 0).setDepth(this.menuDepth);
 
     const boxW = 440, boxH = 520;
-    const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2,
-      this.scale.width, this.scale.height, 0x000000).setAlpha(0.6).setInteractive();
+    const overlay = this.add.rectangle(GAME_W / 2, GAME_H / 2,
+      GAME_W, GAME_H, 0x000000).setAlpha(0.6).setInteractive();
     const box = this.add.rectangle(this.centerX, this.boardContainer.y + 30, boxW, boxH, 0x1b2330)
       .setStrokeStyle(2, 0x2a3547).setOrigin(0.5, 0);
     const title = makeText(this, box.x, box.y + 16, 'Меню', 'h2').setOrigin(0.5, 0);

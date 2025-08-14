@@ -12,3 +12,4 @@
 - swap bonus and daily quest with menu integration
 - settings tab with bonus help text
 - deterministic HUD layout with camera reset, board scaling, and watchdog; removed stray mini texts
+- switch to RESIZE mode with virtual layout and camera zoom/center to prevent HUD drift
