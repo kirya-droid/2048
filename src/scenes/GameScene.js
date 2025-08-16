@@ -141,7 +141,7 @@ export default class GameScene extends Phaser.Scene {
     await (document.fonts?.ready ?? Promise.resolve());
     this.layoutVirtual();
     this.scale.on('resize', this.onResize, this);
-    this.onResize({ width: this.scale.width, height: this.scale.height });
+    this.onResize({ width: this.scale.gameSize.width, height: this.scale.gameSize.height });
     this.time.addEvent({
       delay: 300,
       loop: true,
