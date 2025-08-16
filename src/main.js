@@ -2,8 +2,23 @@ import Phaser from 'phaser';
 import BootScene from './scenes/BootScene.js';
 import GameScene from './scenes/GameScene.js';
 import { initYandexSDK } from './sdk/yandex.js';
-initYandexSDK().catch(()=>{});
-const W=480,H=800;
-new Phaser.Game({ type:Phaser.AUTO, parent:'game', backgroundColor:'#11141a',
-  scale:{ mode:Phaser.Scale.FIT, autoCenter:Phaser.Scale.CENTER_BOTH, width:W, height:H },
-  physics:{ default:'arcade' }, scene:[BootScene, GameScene] });
+import { GAME_W, GAME_H } from './config.js';
+
+initYandexSDK().catch(() => {});
+
+const config = {
+  type: Phaser.AUTO,
+  parent: 'game',
+  backgroundColor: '#0b1220',
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: GAME_W,
+    height: GAME_H
+  },
+  render: { roundPixels: true },
+  physics: { default: 'arcade' },
+  scene: [BootScene, GameScene]
+};
+
+new Phaser.Game(config);
