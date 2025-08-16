@@ -114,6 +114,7 @@ export default class GameScene extends Phaser.Scene {
         this.physics?.world?.resume?.();
         this.time?.resume?.();
         if (this.sound) this.sound.mute = false;
+        this.onResize({ width: this.scale.gameSize.width, height: this.scale.gameSize.height });
       }
     });
 
